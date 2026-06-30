@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="冠军模式AI投资助手 - 客观冷静的投资分析工具">
+  <title>冠军模式AI投资助手</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <div class="header-left">
+        <span class="logo">🏆</span>
+        <h1>冠军模式AI投资助手</h1>
+      </div>
+      <div class="header-actions">
+        <button id="btnSettings" class="btn btn-ghost" title="设置">⚙️ 设置</button>
+        <button id="btnDarkMode" class="btn btn-ghost" title="切换深色模式">🌙</button>
+      </div>
+    </header>
+
+    <main class="main">
+      <aside class="sidebar">
+        <div class="sidebar-header">
+          <h2>自选股</h2>
+          <button id="btnRefreshWatchlist" class="btn btn-sm" title="刷新行情">↻</button>
+        </div>
+        <div class="add-stock">
+          <input type="text" id="stockInput" placeholder="代码 如 002409.SZ" autocomplete="off">
+          <button id="btnAddStock" class="btn btn-primary btn-sm">添加</button>
+        </div>
+        <ul id="watchlist" class="watchlist"></ul>
+        <p class="sidebar-tip">点击带入对话 · 右键移除</p>
+      </aside>
+
+      <section class="chat-panel">
+        <div class="chat-toolbar">
+          <span class="rules-badge">冠军模式已启用</span>
+          <button id="btnClearChat" class="btn btn-ghost btn-sm">清空对话</button>
+        </div>
+        <div id="chatMessages" class="chat-messages"></div>
+        <div id="reductionAlert" class="reduction-alert hidden"></div>
+        <div class="chat-input-area">
+          <textarea id="chatInput" rows="3" placeholder="输入投资问题，可包含股票代码（如 002409.SZ 或 00148.HK）…"></textarea>
+          <div class="input-actions">
+            <button id="btnSend" class="btn btn-primary">发送分析</button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="app-footer">
+      <nav class="bottom-nav">
+        <button id="navChat" class="nav-item active" type="button">
+          <span class="nav-icon">💬</span>
+          <span>对话</span>
+        </button>
+        <button id="navRules" class="nav-item" type="button">
+          <span class="nav-icon">📋</span>
+          <span>规则管理</span>
+        </button>
+      </nav>
+      <div class="status-bar">
+        <span id="statusText">就绪</span>
+        <span id="statusTime">数据更新时间：--</span>
+      </div>
+    </footer>
+  </div>
+
+  <!-- 规则管理面板 -->
+  <section id="rulesPanel" class="rules-panel hidden">
+    <div class="rules-panel-header">
+      <h2>规则管理</h2>
+      <button id="btnCloseRules" class="btn btn-ghost" type="button" title="返回对话">✕</button>
+    </div>
+    <p class="rules-desc">已启用的规则会自动拼接到 AI 系统提示词，修改后立即生效。</p>
+    <div id="rulesList" class="rules-list"></div>
+    <div class="rules-add-bar">
+      <input type="text" id="newRuleInput" placeholder="输入新规则，或使用语音输入…" autocomplete="off">
+      <button id="btnRuleMic" class="btn btn-mic" type="button" title="语音输入">
+        <span class="mic-icon">🎤</span>
+        <span class="mic-waves" aria-hidden="true"><span></span><span></span><span></span></span>
+      </button>
+      <button id="btnAddRule" class="btn btn-primary btn-sm" type="button">新增规则</button>
+    </div>
+  </section>
+
+  <!-- 设置面板 -->
+  <div id="settingsModal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>设置</h3>
+        <button id="btnCloseSettings" class="btn btn-ghost">✕</button>
+      </div>
+      <div class="modal-body">
+        <label for="apiKeyInput">DeepSeek API 密钥</label>
+        <input type="password" id="apiKeyInput" placeholder="sk-..." autocomplete="off">
+        <p class="hint">密钥仅保存在本机 localStorage，不会上传至任何服务器。</p>
+        <label for="modelSelect">模型</label>
+        <select id="modelSelect">
+          <option value="deepseek-chat">deepseek-chat</option>
+          <option value="deepseek-reasoner">deepseek-reasoner</option>
+        </select>
+      </div>
+      <div class="modal-footer">
+        <button id="btnSaveSettings" class="btn btn-primary">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 加载遮罩 -->
+  <div id="loadingOverlay" class="loading-overlay hidden">
+    <div class="spinner"></div>
+    <span>分析中…</span>
+  </div>
+
+  <script src="js/config.js"></script>
+  <script src="js/storage.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/rules.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

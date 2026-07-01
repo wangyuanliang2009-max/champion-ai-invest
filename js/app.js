@@ -1,6 +1,6 @@
 /**
- * 冠军模式 AI 投资助手 - 主应用逻辑 (V3.1 稳定版)
- * 适配新版界面，包含内循环自校验、防幻觉、多模式等功能
+ * 冠军模式 AI 投资助手 - 主应用逻辑 (V4.0 稳定版)
+ * 包含：深度分析框架、内循环自校验、防幻觉、多模式、UZI指令、减持与利空链接
  */
 
 // ===== 全局配置 =====
@@ -69,12 +69,10 @@ function bindEvents() {
     }
   });
 
-  // 文件上传（暂时仅提示，豆包API未实现）
+  // 文件上传（暂提示）
   const uploadLabel = document.querySelector('.upload-label');
   if (uploadLabel) {
-    uploadLabel.addEventListener('click', () => {
-      setStatus('文件分析功能即将上线');
-    });
+    uploadLabel.addEventListener('click', () => setStatus('文件分析功能即将上线'));
   }
 
   // 自选股右键移除
@@ -280,20 +278,31 @@ async function sendMessage() {
       ? `${text}\n\n--- 系统自动附加的实时数据 ---\n${dataContext}`
       : text;
 
-    // 构建严格系统提示词（含防幻觉）
-    const strictSystemPrompt = buildSystemPrompt() + '\n\n【最高优先级：防幻觉规则】\n1. 只回答有可靠信源的问题，不懂就明确说“不知道”，拒绝猜测。\n2. 在给出判断前，先展示推理过程。\n3. 基于原文引用回答，并标注信息来源。';
+    // 构建系统提示词（防幻觉 + 规则）
+    const systemPrompt = buildSystemPrompt();
+
+    // 检测UZI指令，添加深度分析框架
+    let enhancedUserContent = userContent;
+    const uziMatch = text.match(/^\/(deep_analyze|quick_scan|risk_check|valuation)\s+(\w+)/);
+    if (uziMatch) {
+      enhancedUserContent = buildUziPrompt(uziMatch[1], uziMatch[2]) + '\n\n' + userContent;
+    }
 
     // Maker-Verifier 内循环
     let finalReply = '';
     for (let i = 0; i < MAX_SELF_CORRECT_LOOP; i++) {
       const makerMessages = [
-        { role: 'system', content: strictSystemPrompt },
+        { role: 'system', content: systemPrompt },
         ...chatHistory.filter(m => m.role === 'user' || m.role === 'assistant').slice(-5).map(m => ({ role: m.role, content: m.content }))
       ];
+      // 将最后一条user消息替换为带增强数据的内容
+      makerMessages[makerMessages.length - 1] = { role: 'user', content: enhancedUserContent };
+
       const draftReply = await callDeepSeek(makerMessages);
 
       const verifierMessages = [
-        { role: 'system', content: '你是严格的分析结果校验者。请检查以下AI回复，看是否违反了以下规则：\n1. 是否做到了客观冷静，不迎合用户？\n2. 是否标注了数据来源和时间？\n3. 是否存在逻辑漏洞或过度推测？\n如果发现任何问题，请直接给出具体的修改意见。如果没有问题，请只回复"PASS"。\n\n【待校验的回复】\n' + draftReply }
+        { role: 'system', content: '你是严格的分析结果校验者。请检查以下AI回复是否符合所有规则，尤其注意：是否引用了不存在的价格/数据？是否在数据缺失时强行编造？是否明确说明了数据来源？请给出具体的修改意见，如果完全合规请回复PASS。' },
+        { role: 'user', content: draftReply }
       ];
       const checkResult = await callDeepSeek(verifierMessages);
 
@@ -301,15 +310,11 @@ async function sendMessage() {
         finalReply = draftReply;
         break;
       } else {
-        chatHistory.push({
-          id: genId(),
-          role: 'user',
-          content: `【系统自动校验反馈】\n${checkResult}\n\n请根据以上反馈，修正你的分析报告。`
-        });
+        enhancedUserContent += `\n\n【系统校验反馈（第${i+1}轮）】\n${checkResult}\n请修正分析。`;
         setStatus(`第${i+1}轮自我校验未通过，正在修正...`);
       }
     }
-    if (!finalReply) finalReply = '分析过程达到最大迭代次数，但仍存在潜在缺陷，仅供参考。';
+    if (!finalReply) finalReply = '分析过程达到最大迭代次数，但仍可能存在缺陷。';
 
     const assistantMsg = {
       id: genId(),
@@ -340,6 +345,72 @@ async function sendMessage() {
   }
 }
 
+// ===== UZI 深度分析框架（66位评审团） =====
+function buildUziPrompt(command, stockCode) {
+  // 通用分析框架
+  const framework = `
+【深度分析框架：66位评审团×9大流派×22维数据】
+你将扮演由66位投资大师组成的评审团，对股票【${stockCode}】进行全面分析。评审团包括价值派、成长派、趋势派、量化派、游资派、逆向派、事件驱动派、宏观对冲派和技术派，各派别必须独立表达观点。
+
+请严格遵循以下结构输出报告（使用Markdown格式）：
+
+## 一、公司速览
+- 主营业务、行业地位、市值规模
+- 实际控制人与管理层稳定性
+- 近期重大事件（减持、回购、诉讼等）
+
+## 二、财务深度透视
+- 近3年营收/净利润/现金流趋势
+- 盈利能力（毛利率、ROE、净利率）及变化原因
+- 资产负债结构与偿债能力
+- 应收账款/存货异常风险
+
+## 三、行业与竞争格局
+- 赛道景气度（政策支持、市场需求）
+- 竞争对手对比（市占率、技术壁垒）
+- 上游议价与下游定价权
+
+## 四、估值与预期
+- 当前PE/PB/PS历史分位
+- DCF现金流折现估算（假设条件）
+- 与国内外同行估值对比
+- 未来两年盈利预期及增长驱动
+
+## 五、多空辩论（必选）
+至少3条看多理由 vs 3条看空理由，每条需注明代表流派（如：价值派看空，因为PB高于行业均值）。
+
+## 六、风险评估
+- 大股东减持/质押风险
+- 行业政策风险
+- 技术替代风险
+- 财务造假/暴雷概率
+
+## 七、投资建议
+- 综合评分（1-10分）
+- 红绿灯评级：🟢强烈看好 / 🟡谨慎看好 / ⚪中性 / 🟠存在风险 / 🔴强烈回避
+- 适合什么类型的投资者（长线价值/波段趋势/短线游资）
+
+【重要原则】
+- 所有数据必须标注来源（如“根据2025年年报”、“东方财富实时行情”）。
+- 如果实时数据缺失，必须明确说明“当前无法获取该数据”，然后基于最近一期公开财报分析。
+- 估值部分必须列出假设条件，避免给出不负责任的精确数字。
+- 严禁使用训练数据中的过时股价或财务信息。
+`;
+
+  switch (command) {
+    case 'deep_analyze':
+      return framework + '\n请进行最详尽的深度分析，报告不少于2000字。';
+    case 'quick_scan':
+      return `请对【${stockCode}】进行30秒快速扫描，只输出：当前价格、涨跌幅、核心风险指标、1句话建议。`;
+    case 'risk_check':
+      return `请扮演审计师，专门排查【${stockCode}】的潜在风险：财务异常、大股东掏空、监管处罚、行业利空等，输出风险清单。`;
+    case 'valuation':
+      return `请使用DCF、PE、PB、PS等多种方法对【${stockCode}】进行估值，给出合理估值区间，并说明假设。`;
+    default:
+      return `请分析 ${stockCode}`;
+  }
+}
+
 // ===== 消息展示 =====
 function appendMessageUI(msg, animate = true) {
   const div = document.createElement('div');
@@ -361,7 +432,6 @@ function appendMessageUI(msg, animate = true) {
     contextHtml = `<div class="data-context">${escapeHtml(msg.dataContext)}</div>`;
   }
 
-  // 添加A股减持和利空链接
   let manualLinksHtml = '';
   if (msg.stockCodes && msg.stockCodes.length > 0) {
     msg.stockCodes.forEach(code => {
@@ -425,12 +495,6 @@ function showReductionAlert(reduction, codes) {
   }
 }
 
-// ===== UZI 超级指令构建 =====
-function buildUziPrompt(command, stockCode) {
-  // ... (保持之前实现，此处省略，可在实际文件中补全)
-  return `请分析 ${stockCode}`;
-}
-
 // ===== 辅助函数 =====
 function setStatus(text) { statusTextEl.textContent = text; }
 function showLoading(show) { loadingOverlay.classList.toggle('hidden', !show); }
@@ -438,7 +502,7 @@ function scrollToBottom() { chatMessagesEl.scrollTop = chatMessagesEl.scrollHeig
 function genId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
 function escapeHtml(str) { return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
-// ===== 语音管理（简化版，保留原有 SpeechManager 代码） =====
+// ===== 语音管理 =====
 const SpeechManager = {
   utterance: null, currentMsgId: null, state: 'idle',
   speak(text, msgId) {
@@ -460,7 +524,7 @@ const SpeechManager = {
   _setState(s) { this.state = s; },
 };
 
-// ===== A股减持与利空链接 =====
+// ===== 链接生成 =====
 function getAShareShareholding(stockCode) {
   const codeNumber = stockCode.split('.')[0];
   return `<a href="https://data.eastmoney.com/dxf/q/${codeNumber}.html" target="_blank">东方财富股东减持（${codeNumber}）</a>`;

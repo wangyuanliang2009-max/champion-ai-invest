@@ -1,5 +1,5 @@
 /**
- * 股票行情、数据获取、格式化、代码解析
+ * 股票行情、数据获取、格式化、代码解析 (通用优化版)
  * 依赖：js/config.js, js/api.js
  */
 
@@ -8,7 +8,7 @@ function parseStockCode(raw) {
   if (!raw) return null;
   const clean = raw.trim().toUpperCase().replace(/\s+/g, '');
   
-  // 港股模式：5位数字.HK 或纯5位数字自动加HK
+  // 港股模式：5位数字.HK 或纯数字自动加HK
   const hkMatch = clean.match(/^(\d{1,5})(\.HK)?$/);
   if (hkMatch) {
     const codeNum = hkMatch[1].padStart(5, '0');
@@ -73,40 +73,69 @@ async function fetchQuote(parsed) {
   const cached = Storage.getCachedQuote(cacheKey);
   if (cached) return cached;
 
-  const url = parsed.isHK
-    ? `https://push2.eastmoney.com/api/qt/stock/get?secid=${parsed.secid}&fields=f43,f44,f45,f46,f47,f48,f50,f51,f52,f55,f57,f58,f60,f116,f117,f162,f167,f169,f170,f171`
-    : `https://push2.eastmoney.com/api/qt/stock/get?secid=${parsed.secid}&fields=f43,f44,f45,f46,f47,f48,f50,f51,f52,f55,f57,f58,f60,f116,f117,f162,f167,f169,f170,f171`;
-
-  const res = await fetch(url);
-  const json = await res.json();
+  // 确保secid格式正确：港股 116.XXXXX，A股 0.XXXXXX 或 1.XXXXXX
+  const secid = parsed.isHK ? `116.${parsed.code.padStart(5, '0')}` : parsed.secid;
   
-  if (!json || !json.data) {
-    throw new Error('行情数据获取失败');
+  const url = `https://push2.eastmoney.com/api/qt/stock/get?secid=${secid}&fields=f43,f44,f45,f46,f47,f48,f50,f51,f52,f55,f57,f58,f60,f116,f117,f162,f167,f169,f170,f171`;
+
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    
+    if (!json || !json.data || json.data.f43 === '-') {
+      throw new Error('行情数据返回异常');
+    }
+
+    const d = json.data;
+    const price = d.f43 / 100;
+    const changePct = d.f170 / 100;
+    const name = d.f58 || parsed.secucode;
+    
+    // 合理性校验：价格不应为负或极端值
+    if (price <= 0 || price > 1e6) {
+      throw new Error(`价格异常: ${price}`);
+    }
+    
+    const result = {
+      name,
+      price,
+      changePct,
+      high: (d.f44 || 0) / 100,
+      low: (d.f45 || 0) / 100,
+      volume: d.f47 || 0,
+      turnover: d.f48 || 0,
+      updateTime: new Date().toLocaleTimeString(),
+    };
+
+    Storage.setCachedQuote(cacheKey, result);
+    return result;
+  } catch (e) {
+    // 如果有缓存且数据较新（30分钟内），使用缓存
+    if (cached && (Date.now() - cached.timestamp) < 1800000) {
+      return cached.data;
+    }
+    throw new Error(`获取 ${parsed.secucode} 行情失败: ${e.message}`);
   }
-
-  const d = json.data;
-  const price = d.f43 / 100;
-  const changePct = d.f170 / 100; // 涨跌幅
-  const name = d.f58 || parsed.secucode;
-  
-  const result = {
-    name,
-    price,
-    changePct,
-    high: d.f44 / 100,
-    low: d.f45 / 100,
-    volume: d.f47,
-    turnover: d.f48,
-    updateTime: new Date().toLocaleTimeString(),
-  };
-
-  Storage.setCachedQuote(cacheKey, result);
-  return result;
 }
 
 // 构建发送给AI的股票数据上下文
 async function buildStockContext(parsed) {
-  const quote = await fetchQuote(parsed);
+  let quote;
+  try {
+    quote = await fetchQuote(parsed);
+  } catch (e) {
+    // 行情失败时返回基本信息，不中断流程
+    return {
+      secucode: parsed.secucode,
+      name: parsed.secucode,
+      price: null,
+      changePct: null,
+      isHK: parsed.isHK,
+      financeError: true,
+      reduction: { error: true, msg: '行情获取失败' }
+    };
+  }
   
   let ctx = {
     secucode: parsed.secucode,
@@ -116,65 +145,74 @@ async function buildStockContext(parsed) {
     isHK: parsed.isHK,
   };
 
-  // 尝试获取财务摘要（东方财富接口）
+  // 获取财务数据（尝试东方财富数据接口）
   try {
     const finUrl = parsed.isHK
       ? `https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_HK_F10_FINANCE_MAININDICATOR&columns=REPORT_DATE,BASIC_EPS,WEIGHTAVG_ROE,TOTAL_OPERATE_INCOME,PARENT_NETPROFIT&filter=(SECURITY_CODE="${parsed.secucode}")&pageNumber=1&pageSize=4&sortTypes=-1&sortColumns=REPORT_DATE`
       : `https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_DMSK_FN_MAININDICATOR&columns=REPORT_DATE,BASIC_EPS,WEIGHTAVG_ROE,TOTAL_OPERATE_INCOME,PARENT_NETPROFIT&filter=(SECURITY_CODE="${parsed.code}")&pageNumber=1&pageSize=4&sortTypes=-1&sortColumns=REPORT_DATE`;
     
     const finRes = await fetch(finUrl);
-    const finJson = await finRes.json();
-    if (finJson && finJson.result && finJson.result.data) {
-      const latest = finJson.result.data[0];
-      if (latest) {
+    if (finRes.ok) {
+      const finJson = await finRes.json();
+      if (finJson && finJson.result && finJson.result.data && finJson.result.data.length > 0) {
+        const latest = finJson.result.data[0];
         ctx.latestRevenue = latest.TOTAL_OPERATE_INCOME;
         ctx.latestProfit = latest.PARENT_NETPROFIT;
         ctx.latestROE = latest.WEIGHTAVG_ROE;
+        ctx.latestEPS = latest.BASIC_EPS;
       }
     }
   } catch (e) {
-    // 财务数据获取失败不影响主流程
     ctx.financeError = true;
   }
 
-  // 尝试获取减持数据（模拟实现，具体可优化）
+  // 获取减持数据
   try {
-    const reduction = await fetchReductionData(parsed);
-    ctx.reduction = reduction;
+    ctx.reduction = await fetchReductionData(parsed);
   } catch (e) {
-    ctx.reduction = { error: true, msg: '减持数据暂不可用' };
+    ctx.reduction = { error: true, msg: '减持数据查询失败' };
   }
 
   return ctx;
 }
 
-// 获取减持数据（调用东方财富或港交所）
+// 获取减持数据（东方财富接口）
 async function fetchReductionData(parsed) {
-  // 简化实现，实际可调用港交所披露易或东方财富股东减持接口
+  // 尝试使用东方财富股东变动接口
   const url = parsed.isHK
     ? `https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_HK_HOLDERS_CHANGE&columns=HOLDER_NAME,CHANGE_DATE,CHANGE_NUM&filter=(SECURITY_CODE="${parsed.secucode}")&pageNumber=1&pageSize=10`
     : `https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_DMSK_HOLDERS_CHANGE&columns=HOLDER_NAME,CHANGE_DATE,CHANGE_NUM&filter=(SECURITY_CODE="${parsed.code}")&pageNumber=1&pageSize=10`;
   
   try {
     const res = await fetch(url);
+    if (!res.ok) throw new Error('接口不可用');
     const json = await res.json();
     if (json && json.result && json.result.data && json.result.data.length > 0) {
-      const records = json.result.data.slice(0, 5).map(r => ({
-        holder: r.HOLDER_NAME,
-        noticeDate: r.CHANGE_DATE,
-        changeNum: r.CHANGE_NUM,
-      }));
-      return {
-        hasReduction: true,
-        totalCount: json.result.data.length,
-        records,
-        source: '东方财富',
-        since: new Date(Date.now() - 90*24*60*60*1000).toISOString().slice(0,10),
-      };
+      // 筛选近3个月（90天）的记录
+      const threeMonthsAgo = new Date();
+      threeMonthsAgo.setDate(threeMonthsAgo.getDate() - 90);
+      const recentRecords = json.result.data.filter(r => {
+        const noticeDate = new Date(r.CHANGE_DATE);
+        return noticeDate >= threeMonthsAgo;
+      });
+      if (recentRecords.length > 0) {
+        return {
+          hasReduction: true,
+          totalCount: recentRecords.length,
+          records: recentRecords.slice(0, 5).map(r => ({
+            holder: r.HOLDER_NAME,
+            noticeDate: r.CHANGE_DATE,
+            changeNum: r.CHANGE_NUM,
+          })),
+          source: '东方财富',
+          since: threeMonthsAgo.toISOString().slice(0,10),
+        };
+      }
+      return { hasReduction: false, source: '东方财富' };
     }
-    return { hasReduction: false, source: '东方财富' };
+    return { error: true, msg: '数据格式异常' };
   } catch (e) {
-    return { error: true, msg: '减持数据查询失败' };
+    return { error: true, msg: e.message };
   }
 }
 
@@ -182,7 +220,11 @@ async function fetchReductionData(parsed) {
 function formatContextForAI(ctx) {
   let parts = [];
   parts.push(`股票：${ctx.name}（${ctx.secucode}）`);
-  parts.push(`最新价：${ctx.price?.toFixed(ctx.isHK ? 3 : 2)}，涨跌幅：${ctx.changePct?.toFixed(2)}%`);
+  if (ctx.price != null) {
+    parts.push(`最新价：${ctx.price.toFixed(ctx.isHK ? 3 : 2)}，涨跌幅：${ctx.changePct?.toFixed(2)}%`);
+  } else {
+    parts.push('实时行情暂不可用');
+  }
   
   if (ctx.latestRevenue) {
     parts.push(`最近一期营收：${(ctx.latestRevenue / 1e8).toFixed(2)}亿`);
@@ -194,9 +236,11 @@ function formatContextForAI(ctx) {
     parts.push(`ROE：${ctx.latestROE.toFixed(2)}%`);
   }
   
-  if (ctx.reduction && !ctx.reduction.error) {
-    if (ctx.reduction.hasReduction) {
-      parts.push(`⚠ 近期存在大股东减持记录`);
+  if (ctx.reduction) {
+    if (ctx.reduction.error) {
+      parts.push(`⚠ 减持数据获取失败，请手动查询港交所披露易`);
+    } else if (ctx.reduction.hasReduction) {
+      parts.push(`⚠ 近期存在大股东减持记录（${ctx.reduction.totalCount}条）`);
     }
   }
   

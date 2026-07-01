@@ -8,6 +8,31 @@ const RulesManager = {
 
   init() {
     this.rules = Storage.getRules();
+    
+    // 补全默认规则：如果首次使用或规则数量不足，自动补齐10条核心规则
+    if (!this.rules || this.rules.length < 10) {
+      const essentialRules = [
+        "永远客观冷静，不迎合，不安抚用户情绪。",
+        "分析任何标的之前，必须核查大股东近3个月减持记录（港股用披露易，A股用东方财富/巨潮资讯网）。",
+        "分析港股标的之前，必须核查近20日日均成交额，低于1亿港元自动警告。",
+        "数据必须标注来源和获取时间，禁止凭记忆或推算给出数据。",
+        "永远基于事实和逻辑进行分析，不凭感觉。",
+        "当用户判断与事实不符时，直接指出，不委婉，不回避。",
+        "在港股，永远选择最纯粹的标的。能买子公司，不买母公司。",
+        "当某个板块或标的短期内涨幅超过20%且没有新的基本面催化剂时，禁止追高加仓。",
+        "港股流动性差，存在结构性折价，大股东减持会放大跌幅，必须警惕。",
+        "必须核查公司是否有大股东/管理层近期减持行为，若有则高度警惕。"
+      ];
+      
+      // 用核心规则覆盖初始化，确保用户从完整的投资纪律开始
+      this.rules = essentialRules.map((content, index) => ({
+        id: 'default_rule_' + index,
+        content: content,
+        enabled: true
+      }));
+      this.persist();
+    }
+    
     this.render();
     this.bindEvents();
     this.initSpeechInput();

@@ -37,6 +37,7 @@ const RulesManager = {
     this.bindEvents();
     this.initSpeechInput();
     this.updateRulesBadge();
+    this.scheduleSelfRefine(); 
   },
 
   genId() {
@@ -254,6 +255,53 @@ const RulesManager = {
         setStatus(`语音识别失败: ${event.error}`);
       }
     };
+  },
+
+  // ===== 外层循环：每日自动复盘进化 =====
+  scheduleSelfRefine() {
+    const now = new Date();
+    const targetHour = 18;
+    let triggerTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), targetHour, 0, 0);
+    if (now > triggerTime) triggerTime.setDate(triggerTime.getDate() + 1);
+    
+    const msUntilTrigger = triggerTime - now;
+    setTimeout(() => {
+      this.runOuterSelfRefineLoop();
+      setInterval(() => this.runOuterSelfRefineLoop(), 24 * 60 * 60 * 1000);
+    }, msUntilTrigger);
+  },
+
+  async runOuterSelfRefineLoop() {
+    if (!Storage.getApiKey()) return;
+    setStatus('外层循环复盘：正在总结投资经验...');
+    const allHistory = Storage.getChatHistory();
+    if (!allHistory || allHistory.length === 0) return;
+
+    const messages = [
+      { 
+        role: 'system', 
+        content: '你是冠军模式投资助手的系统进化师。请复盘以下最近的投资对话，找出高频错误或可优化的分析模式，直接给出2-3条具体的、可执行的优化建议，每条建议都以"规则："开头。' 
+      },
+      { 
+        role: 'user', 
+        content: JSON.stringify(allHistory.slice(-30)) 
+      }
+    ];
+    
+    try {
+      const reply = await callDeepSeek(messages);
+      const reportMsg = {
+        id: 'refine_' + Date.now(),
+        role: 'assistant',
+        content: `**📈 每日进化建议**\n${reply}\n\n（可将建议手动添加到规则面板）`,
+        time: nowStr()
+      };
+      const chatHistory = Storage.getChatHistory();
+      chatHistory.push(reportMsg);
+      Storage.setChatHistory(chatHistory);
+    } catch (e) {
+      // 静默失败，不影响主流程
+    }
   },
 };
 

@@ -299,8 +299,19 @@ function appendMessageUI(msg, animate = true) {
     contextHtml = `<div class="data-context">${escapeHtml(msg.dataContext)}</div>`;
   }
 
+  // 新增：添加A股减持和利空新闻链接
+  let manualLinksHtml = '';
+  if (msg.stockCodes && msg.stockCodes.length > 0) {
+    msg.stockCodes.forEach((code) => {
+      if (code.includes('.SZ') || code.includes('.SH')) {
+        manualLinksHtml += getAShareShareholding(code) + '<br>';
+      }
+      manualLinksHtml += getNegativeNews(code) + '<br>';
+    });
+  }
+
   div.innerHTML = `
-    <div class="message-bubble">${escapeHtml(msg.content)}${contextHtml}</div>
+    <div class="message-bubble">${escapeHtml(msg.content)}${contextHtml}${manualLinksHtml ? '<hr>' + manualLinksHtml : ''}</div>
     <div class="message-meta">${msg.time || ''}</div>
     ${actionsHtml}`;
 
@@ -337,6 +348,7 @@ async function sendMessage() {
     role: 'user',
     content: text,
     time: nowStr(),
+    stockCodes: [],
   };
   chatHistory.push(userMsg);
   Storage.setChatHistory(chatHistory);
@@ -352,6 +364,9 @@ async function sendMessage() {
     if (selectedStock && !codes.some((c) => c.secid === selectedStock.secid)) {
       codes.unshift(parseStockCode(selectedStock.secucode));
     }
+
+    // 记录涉及的股票代码，用于后续显示手动查询链接
+    userMsg.stockCodes = codes.map((c) => c.secucode);
 
     let dataContext = '';
     let reductionInfo = null;
@@ -400,6 +415,7 @@ async function sendMessage() {
       content: reply,
       dataContext: dataContext || null,
       time: nowStr(),
+      stockCodes: userMsg.stockCodes,
     };
     chatHistory.push(assistantMsg);
     Storage.setChatHistory(chatHistory);
@@ -411,6 +427,7 @@ async function sendMessage() {
       role: 'assistant',
       content: `分析失败: ${err.message}`,
       time: nowStr(),
+      stockCodes: [],
     };
     chatHistory.push(errMsg);
     appendMessageUI(errMsg);
@@ -430,10 +447,14 @@ function showReductionAlert(reduction, codes) {
   reductionAlertEl.classList.remove('hidden', 'danger');
 
   if (reduction.error) {
+    const hkCodeNum = (codes[0]?.code || stockCode || '').replace('.HK', '').replace('.hk', '');
+    const hkexUrl = `https://sc.hkexnews.hk/TuniS/di.hkex.com.hk/di/NSSrchCorp.aspx?src=MAIN&lang=ZH&g_lang=zh-HK&stockid=${hkCodeNum}`;
     reductionAlertEl.innerHTML = `
-      <strong>港股减持核查</strong>：自动数据获取失败，请手动核查
-      <a href="${CONFIG.HKEX_DISCLOSURE_URL}" target="_blank" rel="noopener">港交所披露易</a>
-      及 <a href="https://hk.eastmoney.com/hold.html?code=${codes[0]?.code || ''}" target="_blank" rel="noopener">东方财富机构持仓</a>`;
+      <strong>港股减持核查</strong>：自动数据获取失败。<br>
+      <a href="${hkexUrl}" target="_blank" rel="noopener">
+        点击这里直接查询港交所披露易（${hkCodeNum}）
+      </a>
+      <br><small>（港交所权益披露通常于交易日 16:30-23:00 更新）</small>`;
     return;
   }
 
@@ -489,6 +510,33 @@ function escapeHtml(str) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+// ===== A股减持核查（手动链接） =====
+function getAShareShareholding(stockCode) {
+  const codeNumber = stockCode.split('.')[0];
+  const eastmoneyUrl = `https://data.eastmoney.com/dxf/q/${codeNumber}.html`;
+  const cninfoUrl = `http://www.cninfo.com.cn/new/commonUrl?url=disclosure/list/notice&stockCode=${codeNumber}`;
+  return `
+    <strong>A股减持核查</strong>：请手动查询<br>
+    <a href="${eastmoneyUrl}" target="_blank" rel="noopener">东方财富股东减持（${codeNumber}）</a><br>
+    <a href="${cninfoUrl}" target="_blank" rel="noopener">巨潮资讯网公告（${codeNumber}）</a>`;
+}
+
+// ===== 利空新闻查询 =====
+function getNegativeNews(stockCode) {
+  let url;
+  if (stockCode.includes('.SZ') || stockCode.includes('.SH')) {
+    const codeNumber = stockCode.split('.')[0];
+    url = `https://search.eastmoney.com/search?m=1&t=1&k=${codeNumber}+利空`;
+  } else if (stockCode.includes('.HK')) {
+    const codeNumber = stockCode.split('.')[0];
+    url = `https://sina.com.hk/news/search/search.html?k=${codeNumber}+利空`;
+  }
+  if (url) {
+    return `<a href="${url}" target="_blank" rel="noopener">查询利空新闻（${stockCode}）</a>`;
+  }
+  return '';
 }
 
 document.addEventListener('DOMContentLoaded', init);

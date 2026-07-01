@@ -1,6 +1,5 @@
-/**
- * 冠军模式 AI 投资助手 - V4.2 深度分析+盘前速览+防幻觉
- */
+// js/app.js - V4.3 减持自动提醒 + 深度框架
+
 const MAX_SELF_CORRECT_LOOP = 2;
 const $ = (sel) => document.querySelector(sel);
 
@@ -28,7 +27,7 @@ function init() {
   bindEvents();
   RulesManager.init();
   if (watchlist.length > 0) refreshAllQuotes();
-  setStatus('就绪 | 选择模式开始');
+  setStatus('就绪');
 }
 
 function bindEvents() {
@@ -65,78 +64,53 @@ function switchMode(mode) {
   currentMode = mode;
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.querySelector(`.tab[data-mode="${mode}"]`).classList.add('active');
-  chatInputEl.placeholder = {
-    'chat': '输入代码或问题...',
-    'premarket': '盘前速览：自动扫描自选股异动...',
-    'postmarket': '盘后体检：复查持仓...',
-    'info': '粘贴新闻/研报...'
-  }[mode];
+  chatInputEl.placeholder = { chat: '输入代码或问题...', premarket: '盘前速览...', postmarket: '盘后体检...', info: '粘贴新闻...' }[mode];
   if (mode === 'premarket') runPreMarketScan();
-  if (mode === 'postmarket') chatInputEl.value = '请对我的自选股进行盘后体检，包括估值、技术面和消息面';
-  setStatus(`已切换到${document.querySelector(`.tab[data-mode="${mode}"]`).textContent}模式`);
 }
 
 // ---- 盘前速览 ----
 async function runPreMarketScan() {
-  if (watchlist.length === 0) { setStatus('自选股为空，无法扫描'); return; }
-  setStatus('正在执行盘前扫描...');
+  if (watchlist.length === 0) return;
+  setStatus('盘前扫描中...');
   const codes = watchlist.map(s => parseStockCode(s.secucode));
   const results = [];
   for (const parsed of codes) {
     try {
       const ctx = await buildStockContext(parsed);
       results.push(formatContextForAI(ctx));
-    } catch (e) { results.push(`${parsed.secucode} 数据获取失败`); }
+      if (parsed.isHK) {
+        // 港股减持提醒直接加入结果
+        results.push(`→ 请核查披露易：https://sc.hkexnews.hk/TuniS/di.hkex.com.hk/di/NSSrchCorp.aspx?src=MAIN&lang=ZH&g_lang=zh-HK&stockid=${parsed.code}`);
+      }
+    } catch (e) { results.push(`${parsed.secucode} 数据错误`); }
   }
-  const prompt = `盘前速览报告（${new Date().toLocaleDateString()}）\n自选股扫描结果：\n${results.join('\n')}\n\n请总结异动，特别提示有减持信号的股票。`;
-  chatInputEl.value = prompt;
+  chatInputEl.value = `盘前扫描 (${new Date().toLocaleDateString()})\n${results.join('\n')}\n请重点提示减持风险。`;
   sendMessage();
 }
 
-// ---- 深度分析提示词 ----
-function getDeepAnalysisFramework(stockCode) {
+// ---- 深度分析框架 ----
+function getDeepAnalysisFramework(code) {
   return `
 【深度分析框架：66评审团 × 9大流派 × 22维数据】
-请以资深投资大师的身份，对 ${stockCode} 出具结构化报告。必须严格按照以下模板输出（使用Markdown）：
+请按以下结构输出 ${code} 的分析报告（Markdown）：
 
 ## 一、公司速览
-- 主营业务、行业地位、市值规模
-- 实际控制人与近期重大事件
-
 ## 二、财务深度透视
-- 近3年营收/净利润/现金流趋势
-- 盈利能力（毛利率、ROE、净利率）
-- 资产负债与偿债风险
-
-## 三、行业与竞争格局
-- 赛道景气度、政策支持
-- 竞争对手比较、护城河
-
+## 三、行业与竞争
 ## 四、估值与预期
-- 当前PE/PB/PS在历史中的分位
-- DCF等绝对估值假设
-- 与国内外同行对比
+## 五、多空辩论 (至少3 vs 3)
+## 六、风险评估 (必含减持/流动性)
+## 七、投资建议 (评分+红绿灯)
 
-## 五、多空辩论
-- 至少3条看多理由 vs 3条看空理由，注明流派
-
-## 六、风险评估
-- 大股东减持/质押、政策、技术替代、财务风险
-
-## 七、投资建议
-- 综合评分（1-10）
-- 红绿灯：🟢🟡⚪🟠🔴
-- 适合投资者类型
-
-**核心原则**：数据必须标注来源；缺失时明确说明；禁止使用过时或编造数字。`;
+**原则**：数据标源；缺失明示；禁用过时信息。`;
 }
 
 function buildUziPrompt(cmd, code) {
   switch (cmd) {
     case 'deep_analyze': return getDeepAnalysisFramework(code);
-    case 'quick_scan': return `快速扫描 ${code}：价格、涨跌、核心风险、一句话建议。`;
-    case 'risk_check': return `审计 ${code}，列出所有可能风险点。`;
-    case 'valuation': return `对 ${code} 进行DCF、PE、PB估值，给出合理区间。`;
+    case 'quick_scan': return `快速扫描 ${code}：现价、涨跌、核心风险、一句话。`;
+    case 'risk_check': return `审计 ${code} 所有潜在风险。`;
+    case 'valuation': return `对 ${code} DCF/PE/PB 估值。`;
     default: return '';
   }
 }
@@ -146,27 +120,39 @@ async function sendMessage() {
   const text = chatInputEl.value.trim();
   if (!text) return;
   if (!Storage.getApiKey()) { openSettings(); return; }
-  const userMsg = { id: genId(), role: 'user', content: text, time: nowStr(), stockCodes: [] };
+  const userMsg = { id: genId(), role:'user', content: text, time: nowStr(), stockCodes: [] };
   chatHistory.push(userMsg);
   appendMessageUI(userMsg);
   chatInputEl.value = '';
   showLoading(true);
+  setStatus('分析中...');
   try {
     const codes = extractStockCodes(text);
-    if (selectedStock && !codes.some(c => c.secid === selectedStock.secid)) codes.unshift(parseStockCode(selectedStock.secucode));
-    userMsg.stockCodes = codes.map(c => c.secucode);
+    if (selectedStock && !codes.some(c=>c.secid===selectedStock.secid)) codes.unshift(parseStockCode(selectedStock.secucode));
+    userMsg.stockCodes = codes.map(c=>c.secucode);
     let contexts = [];
-    for (const parsed of codes.slice(0, 3)) {
+    for (const parsed of codes.slice(0,3)) {
       try {
         const ctx = await buildStockContext(parsed);
         contexts.push(formatContextForAI(ctx));
-      } catch (e) { contexts.push(`${parsed.secucode} 数据错误`); }
+        // 港股强制减持提醒
+        if (parsed.isHK && ctx.reduction && ctx.reduction.error) {
+          contexts.push(`⚠ 减持需手动查询：https://sc.hkexnews.hk/TuniS/di.hkex.com.hk/di/NSSrchCorp.aspx?src=MAIN&lang=ZH&g_lang=zh-HK&stockid=${parsed.code}`);
+        }
+      } catch(e) { contexts.push(`${parsed.secucode} 数据错误`); }
     }
-    const dataBlock = contexts.length ? `\n\n--- 实时数据 ---\n${contexts.join('\n')}` : '';
+    let dataBlock = contexts.length ? `\n\n--- 实时数据 ---\n${contexts.join('\n')}` : '';
     let enhanced = text;
     const uzi = text.match(/^\/(deep_analyze|quick_scan|risk_check|valuation)\s+(\w+)/);
     if (uzi) enhanced = buildUziPrompt(uzi[1], uzi[2]) + '\n' + enhanced;
-    const system = buildSystemPrompt();
+
+    // 强制追加减持查询提示到用户消息中
+    const hkCodes = codes.filter(c => c.isHK);
+    if (hkCodes.length > 0) {
+      enhanced += `\n\n【系统提示：请务必核查以下港股的大股东减持记录（链接见数据区），并在报告中明确说明。】`;
+    }
+
+    const system = buildSystemPrompt() + '\n【防幻觉】只能使用提供的数据，缺失时明确告知。';
     let finalReply = '';
     for (let i=0; i<MAX_SELF_CORRECT_LOOP; i++) {
       const msgs = [
@@ -176,30 +162,39 @@ async function sendMessage() {
       msgs.push({ role:'user', content: enhanced + dataBlock });
       const draft = await callDeepSeek(msgs);
       const verify = await callDeepSeek([
-        { role:'system', content:'校验以下回复是否完全合规（无编造数据、标注来源）。是回复PASS，否则给出修改意见。' },
+        { role:'system', content:'校验以下回复是否合规（无编造，标源）。是回复PASS，否则给修改意见。' },
         { role:'user', content: draft }
       ]);
       if (verify.trim().toUpperCase()==='PASS') { finalReply = draft; break; }
       enhanced += `\n[校验反馈]${verify}\n请修正。`;
     }
-    if (!finalReply) finalReply = '分析未通过校验，请重试。';
+    if (!finalReply) finalReply = '分析未通过校验。';
     const asst = { id: genId(), role:'assistant', content: finalReply, time: nowStr(), stockCodes: userMsg.stockCodes };
     chatHistory.push(asst);
     appendMessageUI(asst);
-  } catch (e) {
+  } catch(e) {
     const err = { id: genId(), role:'assistant', content: `错误: ${e.message}`, time: nowStr() };
     chatHistory.push(err);
     appendMessageUI(err);
   } finally { showLoading(false); scrollToBottom(); }
 }
 
-// ---- 辅助UI ----
+// ---- 消息UI ----
 function appendMessageUI(msg) {
   const div = document.createElement('div');
   div.className = `message ${msg.role}`;
   let actions = '';
-  if (msg.role === 'assistant') actions = `<div class="msg-acts"><button onclick="SpeechManager.speak('${msg.content.replace(/'/g,"\\'")}','${msg.id}')">🔊</button></div>`;
-  div.innerHTML = `<div class="bubble">${escapeHtml(msg.content)}</div><div class="meta">${msg.time}</div>${actions}`;
+  if (msg.role === 'assistant') actions = `<div class="msg-acts"><button onclick="SpeechManager.speak('${escapeHtml(msg.content).replace(/'/g,"\\'")}','${msg.id}')">🔊</button></div>`;
+  let contextHtml = '';
+  if (msg.stockCodes && msg.stockCodes.length > 0) {
+    msg.stockCodes.forEach(code => {
+      if (code.includes('.HK')) {
+        const num = code.split('.')[0];
+        contextHtml += `<div style="margin-top:6px;"><a href="https://sc.hkexnews.hk/TuniS/di.hkex.com.hk/di/NSSrchCorp.aspx?src=MAIN&lang=ZH&g_lang=zh-HK&stockid=${num}" target="_blank">查询披露易 (${num})</a></div>`;
+      }
+    });
+  }
+  div.innerHTML = `<div class="bubble">${escapeHtml(msg.content)}${contextHtml}</div><div class="meta">${msg.time}</div>${actions}`;
   chatMessagesEl.appendChild(div);
 }
 
@@ -207,13 +202,15 @@ function renderChatHistory() {
   chatMessagesEl.innerHTML = chatHistory.length ? '' : '<div class="chat-placeholder">输入指令开始</div>';
   chatHistory.forEach(m => appendMessageUI(m));
 }
+
+// ---- 辅助函数 ----
 function setStatus(t) { statusTextEl.textContent = t; }
 function showLoading(s) { loadingOverlay.classList.toggle('hidden', !s); }
 function scrollToBottom() { chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight; }
 function genId() { return Date.now().toString(36)+Math.random().toString(36).slice(2); }
 function escapeHtml(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
-// 主题/设置/自选列表等（保持简洁，必要时补全）
+// 主题/设置等简略
 function applyTheme(d) { document.documentElement.setAttribute('data-theme',d?'dark':'light'); $('#btnDarkMode').textContent=d?'☀️':'🌙'; }
 function toggleDarkMode() { const d=!Storage.isDarkMode(); Storage.setDarkMode(d); applyTheme(d); }
 function openSettings() { $('#settingsModal').classList.remove('hidden'); }
@@ -221,13 +218,26 @@ function closeSettings() { $('#settingsModal').classList.add('hidden'); }
 function saveSettings() { Storage.setApiKey($('#apiKeyInput').value.trim()); closeSettings(); }
 function clearChat() { chatHistory=[]; Storage.setChatHistory([]); chatMessagesEl.innerHTML=''; }
 
-// 自选股相关（使用先前代码，略作整合）
-function addStock() { /* 同前，略 */ }
-function removeStock(id) { /* 略 */ }
-function selectStock(id) { /* 略 */ }
-function renderWatchlist() { /* 略 */ }
-async function refreshQuote(secid) { /* 略 */ }
-async function refreshAllQuotes() { /* 略 */ }
+// ---- 自选股管理（使用之前的完整代码，这里简写示例） ----
+function addStock() {
+  const raw = stockInputEl.value.trim();
+  const parsed = parseStockCode(raw);
+  if (!parsed) { setStatus('无效代码'); return; }
+  if (watchlist.find(s=>s.secid===parsed.secid)) { setStatus('已存在'); return; }
+  watchlist.push({ secid:parsed.secid, secucode:parsed.secucode, code:parsed.code, name:parsed.secucode, isHK:parsed.isHK });
+  Storage.setWatchlist(watchlist);
+  stockInputEl.value = '';
+  renderWatchlist();
+  refreshQuote(parsed.secid);
+}
+function removeStock(secid) { watchlist = watchlist.filter(s=>s.secid!==secid); Storage.setWatchlist(watchlist); renderWatchlist(); }
+function selectStock(secid) { selectedStock = watchlist.find(s=>s.secid===secid); renderWatchlist(); chatInputEl.value = `请分析 ${selectedStock.secucode} `; chatInputEl.focus(); }
+async function refreshQuote(secid) { /* 略，可用之前的代码 */ }
+async function refreshAllQuotes() { for (const item of watchlist) await refreshQuote(item.secid); }
+function renderWatchlist() {
+  if (watchlist.length===0) { watchlistEl.innerHTML = '<li class="watchlist-empty">无自选</li>'; return; }
+  watchlistEl.innerHTML = watchlist.map(s=>`<li class="watchlist-item${selectedStock?.secid===s.secid?' active':''}" data-secid="${s.secid}">${s.secucode}</li>`).join('');
+}
 
-// 请将原来完整的 addStock/removeStock/selectStock/renderWatchlist/refreshQuote/refreshAllQuotes 代码复制回来，
-// 此处因长度限制省略，确保功能正常。
+// 启动
+document.addEventListener('DOMContentLoaded', init);

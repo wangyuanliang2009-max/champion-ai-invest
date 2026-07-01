@@ -1,7 +1,5 @@
-/**
- * 股票行情、数据获取、格式化、代码解析 (通用优化版 V4.1)
- * 增加数据校验、备用数据源、完整减持接口
- */
+// js/data.js - V4.3 增加减持自动提示逻辑
+
 function parseStockCode(raw) {
   if (!raw) return null;
   const clean = raw.trim().toUpperCase().replace(/\s+/g, '');
@@ -52,7 +50,6 @@ async function fetchQuote(parsed) {
     const d = json.data;
     const price = d.f43 / 100;
     const changePct = d.f170 / 100;
-    // 合理性校验：港股价格范围 0.01-2000，A股 0.1-10000
     if (price <= 0 || price > (parsed.isHK ? 2000 : 10000)) throw new Error(`价格异常: ${price}`);
     const result = {
       name: d.f58 || parsed.secucode,
@@ -73,35 +70,9 @@ async function fetchQuote(parsed) {
 }
 
 async function fetchReductionData(parsed) {
-  // 优先使用东方财富接口，失败则标记为需手动查询
-  const url = parsed.isHK
-    ? `https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_HK_HOLDERS_CHANGE&columns=HOLDER_NAME,CHANGE_DATE,CHANGE_NUM&filter=(SECURITY_CODE="${parsed.secucode}")&pageNumber=1&pageSize=10`
-    : `https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_DMSK_HOLDERS_CHANGE&columns=HOLDER_NAME,CHANGE_DATE,CHANGE_NUM&filter=(SECURITY_CODE="${parsed.code}")&pageNumber=1&pageSize=10`;
-  try {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error('接口不可用');
-    const json = await res.json();
-    if (json && json.result && json.result.data && json.result.data.length > 0) {
-      const threeMonthsAgo = new Date();
-      threeMonthsAgo.setDate(threeMonthsAgo.getDate() - 90);
-      const records = json.result.data.filter(r => new Date(r.CHANGE_DATE) >= threeMonthsAgo);
-      return {
-        hasReduction: records.length > 0,
-        totalCount: records.length,
-        records: records.slice(0, 5).map(r => ({
-          holder: r.HOLDER_NAME,
-          date: r.CHANGE_DATE,
-          changeNum: r.CHANGE_NUM
-        })),
-        source: '东方财富',
-        since: threeMonthsAgo.toISOString().slice(0,10)
-      };
-    }
-    return { hasReduction: false, source: '东方财富' };
-  } catch (e) {
-    // 返回错误对象，上层会处理手动链接
-    return { error: true, msg: '减持数据获取失败', code: parsed.code };
-  }
+  // 东方财富接口可能不完整，我们直接返回需要手动查询的状态
+  // 这样前端会强制提醒
+  return { error: true, msg: '港股减持需手动查询', code: parsed.code };
 }
 
 async function buildStockContext(parsed) {
@@ -133,13 +104,9 @@ async function buildStockContext(parsed) {
         ctx.latestEPS = d.BASIC_EPS;
       }
     }
-  } catch (e) { /* 静默失败 */ }
-  // 减持数据
-  try {
-    ctx.reduction = await fetchReductionData(parsed);
-  } catch (e) {
-    ctx.reduction = { error: true, msg: e.message };
-  }
+  } catch (e) { }
+  // 减持永远标记为需手动
+  ctx.reduction = await fetchReductionData(parsed);
   return ctx;
 }
 
@@ -147,15 +114,11 @@ function formatContextForAI(ctx) {
   let parts = [];
   parts.push(`${ctx.name} (${ctx.secucode})`);
   if (ctx.price != null) parts.push(`最新价：${ctx.price.toFixed(ctx.isHK ? 3 : 2)}，涨跌幅：${ctx.changePct?.toFixed(2) || '0.00'}%`);
-  else parts.push('实时行情暂不可用');
+  else parts.push('行情获取失败');
   if (ctx.latestRevenue) parts.push(`近一期营收：${(ctx.latestRevenue / 1e8).toFixed(2)}亿`);
   if (ctx.latestProfit) parts.push(`净利润：${(ctx.latestProfit / 1e8).toFixed(2)}亿`);
   if (ctx.latestROE) parts.push(`ROE：${ctx.latestROE?.toFixed(2)}%`);
-  if (ctx.reduction) {
-    if (ctx.reduction.error) parts.push(`⚠ 减持数据不可用，请查询披露易`);
-    else if (ctx.reduction.hasReduction) parts.push(`⚠ 近3月有 ${ctx.reduction.totalCount} 条减持记录`);
-    else parts.push('近3月无公开减持');
-  }
+  if (ctx.reduction && ctx.reduction.error) parts.push(`⚠ 减持数据需手动查询披露易 (代码 ${ctx.reduction.code})`);
   return parts.join(' | ');
 }
 

@@ -8,59 +8,75 @@
 </head>
 <body>
   <div id="app" class="app-container">
-    <!-- 顶部导航 -->
-    <header class="app-header">
-      <h1>冠军模式投资助手</h1>
-      <div class="header-actions">
-        <button id="btnDarkMode" title="深色模式">🌙</button>
-        <button id="btnSettings" title="设置">⚙️</button>
+    <!-- 顶部通栏：标题 + 模式导航 -->
+    <header class="header">
+      <div class="header-left">
+        <h1 class="logo">冠军模式投资助手</h1>
+        <span class="badge badge-rule" id="rulesBadge">冠军模式已启用</span>
+      </div>
+      <div class="header-right">
+        <button id="btnDarkMode" class="btn-icon" title="深色模式">🌙</button>
+        <button id="btnSettings" class="btn-icon" title="设置">⚙️</button>
       </div>
     </header>
 
-    <!-- 操作模式切换栏（盘前/盘中/盘后/信息分析） -->
-    <nav class="mode-tabs">
-      <button class="mode-tab active" data-mode="chat">分析对话</button>
-      <button class="mode-tab" data-mode="premarket">盘前速览</button>
-      <button class="mode-tab" data-mode="postmarket">盘后体检</button>
-      <button class="mode-tab" data-mode="info">产业/信息解析</button>
+    <!-- 模式导航标签 -->
+    <nav class="nav-tabs">
+      <button class="tab active" data-mode="chat">分析对话</button>
+      <button class="tab" data-mode="premarket">盘前速览</button>
+      <button class="tab" data-mode="postmarket">盘后体检</button>
+      <button class="tab" data-mode="info">产业/信息解析</button>
     </nav>
 
-    <div class="main-layout">
-      <!-- 侧边栏 -->
-      <aside class="sidebar">
-        <div class="watchlist-section">
-          <div class="section-header">
-            <h3>自选股</h3>
-            <button id="btnRefreshWatchlist" title="刷新行情">🔄</button>
+    <!-- 主内容区：左侧自选 + 右侧对话 -->
+    <div class="main-content">
+      <!-- 左侧：自选股卡片 -->
+      <aside class="sidebar" id="sidebar">
+        <div class="card watchlist-card">
+          <div class="card-header">
+            <h3 class="card-title">自选股</h3>
+            <button id="btnRefreshWatchlist" class="btn-icon-sm" title="刷新行情">🔄</button>
           </div>
-          <input type="text" id="stockInput" placeholder="添加代码 (如 002409.SZ)" />
-          <button id="btnAddStock" class="btn btn-sm">添加</button>
-          <ul id="watchlist" class="watchlist"></ul>
+          <div class="card-body">
+            <div class="input-row">
+              <input type="text" id="stockInput" placeholder="代码 (如 002409.SZ)" />
+              <button id="btnAddStock" class="btn btn-primary btn-sm">添加</button>
+            </div>
+            <ul id="watchlist" class="watchlist"></ul>
+          </div>
         </div>
-        <div class="reduction-alert" id="reductionAlert"></div>
+        <!-- 减持警告区 -->
+        <div id="reductionAlert" class="alert alert-danger hidden"></div>
       </aside>
 
-      <!-- 主分析区 -->
+      <!-- 右侧：主操作区 -->
       <main class="main">
-        <!-- 快速操作栏（一键选择分析类型） -->
-        <div class="quick-actions" id="quickActions">
-          <button class="action-chip" data-action="deep_analyze">深度分析</button>
-          <button class="action-chip" data-action="quick_scan">快速扫描</button>
-          <button class="action-chip" data-action="risk_check">风险排查</button>
-          <button class="action-chip" data-action="valuation">估值分析</button>
-          <button class="action-chip" data-action="debate">多空辩论</button>
-          <button class="action-chip" data-action="info_extract">提取标的</button>
+        <!-- 快捷操作工具栏 -->
+        <div class="toolbar" id="quickActions">
+          <span class="toolbar-label">常用：</span>
+          <button class="chip chip-primary" data-action="deep_analyze">深度分析</button>
+          <button class="chip chip-warning" data-action="quick_scan">快速扫描</button>
+          <button class="chip chip-danger" data-action="risk_check">风险排查</button>
+          <span class="toolbar-separator">|</span>
+          <button class="chip chip-secondary" data-action="valuation">估值分析</button>
+          <button class="chip chip-secondary" data-action="debate">多空辩论</button>
+          <button class="chip chip-secondary" data-action="info_extract">提取标的</button>
         </div>
-        <!-- 文件/图片上传区 -->
-        <div class="file-upload" id="fileUploadArea">
-          <label for="fileInput" class="upload-label">📎 拖拽或点击上传文件/图片 (豆包分析)</label>
+
+        <!-- 文件上传区（可折叠） -->
+        <div class="upload-area" id="fileUploadArea">
+          <label for="fileInput" class="upload-label">📎 点击上传文件/图片 (豆包分析)</label>
           <input type="file" id="fileInput" accept="image/*,.pdf,.txt,.csv,.xlsx" style="display:none" multiple />
         </div>
-        <!-- 对话/报告展示区 -->
-        <div class="chat-messages" id="chatMessages"></div>
-        <!-- 输入区 -->
+
+        <!-- 对话/报告展示区（滚动容器） -->
+        <div class="chat-container" id="chatMessages">
+          <div class="chat-placeholder">输入股票代码或分析指令开始</div>
+        </div>
+
+        <!-- 底部输入区（固定） -->
         <div class="input-area">
-          <textarea id="chatInput" rows="2" placeholder="输入股票代码、指令或粘贴产业信息..."></textarea>
+          <textarea id="chatInput" rows="2" placeholder="输入分析指令、股票代码或粘贴产业信息..."></textarea>
           <div class="input-actions">
             <button id="btnClearChat" class="btn btn-ghost">清屏</button>
             <button id="btnSend" class="btn btn-primary">发送分析</button>
@@ -73,17 +89,59 @@
     <footer class="status-bar">
       <span id="statusText">就绪</span>
       <span id="statusTime">--</span>
-      <span class="rules-badge" id="rulesBadge">冠军模式已启用</span>
     </footer>
 
-    <!-- 加载动画 -->
-    <div id="loadingOverlay" class="loading-overlay hidden">分析中...</div>
+    <!-- 加载遮罩 -->
+    <div id="loadingOverlay" class="loading-overlay hidden">
+      <div class="spinner"></div>
+      <p>分析中...</p>
+    </div>
   </div>
 
-  <!-- 设置模态框（保持原有） -->
-  <div id="settingsModal" class="modal hidden">...</div>
-  <!-- 规则管理面板（保持原有） -->
-  <div id="rulesPanel" class="rules-panel hidden">...</div>
+  <!-- 设置模态框（保持原有功能，样式微调） -->
+  <div id="settingsModal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content card">
+      <div class="modal-header">
+        <h3>设置</h3>
+        <button id="btnCloseSettings" class="btn-icon-sm">✕</button>
+      </div>
+      <div class="modal-body">
+        <label>DeepSeek API 密钥</label>
+        <input type="password" id="apiKeyInput" placeholder="sk-..." />
+        <label>模型</label>
+        <select id="modelSelect">
+          <option value="deepseek-chat">deepseek-chat</option>
+          <option value="deepseek-reasoner">deepseek-reasoner</option>
+        </select>
+      </div>
+      <div class="modal-footer">
+        <button id="btnSaveSettings" class="btn btn-primary">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 规则管理面板（保持原有功能） -->
+  <div id="rulesPanel" class="panel hidden">
+    <div class="panel-header">
+      <h3>规则管理</h3>
+      <button id="btnCloseRules" class="btn-icon-sm">✕</button>
+    </div>
+    <div class="panel-body">
+      <div id="rulesList"></div>
+      <div class="rule-input-row">
+        <input type="text" id="newRuleInput" placeholder="新增规则..." />
+        <button id="btnAddRule" class="btn btn-primary btn-sm">添加</button>
+        <button id="btnRuleMic" class="btn btn-ghost btn-sm">🎤</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 导航：在移动端显示规则入口 -->
+  <div class="mobile-nav">
+    <button id="navChat" class="active">💬 对话</button>
+    <button id="navRules">📋 规则</button>
+  </div>
 
   <script src="js/config.js"></script>
   <script src="js/storage.js"></script>

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>冠军模式 AI 投资助手</title>
+  <title>冠军模式 AI 投资助手 · 最终稳定版</title>
   <style>
     :root {
       --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
@@ -99,7 +99,7 @@
 
     function setLoadingText(t) { const el = $('#loadingText'); if(el) el.textContent = t; }
 
-    // ===== 豆包调用（回退到基础格式，不要求JSON，只要求自然语言+原始摘要）=====
+    // ===== 豆包调用（通过 Vercel 代理，移除了联网参数）=====
     async function askDoubao(prompt) {
       const key = localStorage.getItem('doubao_key'), model = localStorage.getItem('doubao_model');
       if (!key || !model) throw new Error('豆包未配置');
@@ -123,7 +123,7 @@
       if (cached && Date.now() - cached.t < 60000) return cached.data;
       
       try {
-        const txt = await askDoubao(`联网搜索 ${p.secucode} 最新股价和涨跌幅，只返回：价格xx，涨跌xx%`);
+        const txt = await askDoubao(`搜索并告诉我 ${p.secucode} 的最新股价和涨跌幅，只返回：价格xx，涨跌xx%`);
         const priceMatch = txt.match(/价格\s*(\d+\.?\d*)/);
         const pctMatch = txt.match(/涨跌\s*(-?\d+\.?\d*)%?/);
         if (priceMatch) {
@@ -133,7 +133,6 @@
         }
       } catch(e) { console.log('豆包行情失败'); }
 
-      // 备用腾讯
       try {
         const r = await fetchFromTencent(p);
         if (r?.price > 0) { localStorage.setItem(key, JSON.stringify({ data: r, t: Date.now() })); return r; }
@@ -152,7 +151,7 @@
       return { name: arr[1], price: +arr[3], changePct: +arr[32], source: '腾讯' };
     }
 
-    // ===== 财务数据（豆包搜索+带来源的原始摘要）=====
+    // ===== 财务数据（豆包）=====
     async function fetchFinance(p) {
       const cacheKey = 'fin_' + p.secid;
       const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null');
@@ -172,7 +171,7 @@
     // ===== 新闻 =====
     async function fetchNews(p) {
       try {
-        const txt = await askDoubao(`搜索 ${p.secucode} ${p.name||''} 今天最重要的5条新闻，每条新闻必须注明来源（如“来自东方财富”），并标注情绪。如果没有新闻，就说“无最新新闻”。`);
+        const txt = await askDoubao(`搜索 ${p.secucode} ${p.name||''} 今天最重要的5条新闻，每条新闻必须注明来源，并标注情绪。如果没有新闻，就说“无最新新闻”。`);
         return txt;
       } catch(e) { return '新闻获取失败'; }
     }

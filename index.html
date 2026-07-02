@@ -97,31 +97,33 @@
     const $ = s => document.querySelector(s);
     let watchlist = [], chatHistory = [], selectedStock = null;
 
-    // ===== 进度提示 =====
     function setLoadingText(t) { const el = $('#loadingText'); if(el) el.textContent = t; }
 
-    // ===== 豆包调用（自然语言模式，已修复联网参数）=====
+    // ===== 豆包调用（回退到基础格式，不要求JSON，只要求自然语言+原始摘要）=====
     async function askDoubao(prompt) {
       const key = localStorage.getItem('doubao_key'), model = localStorage.getItem('doubao_model');
       if (!key || !model) throw new Error('豆包未配置');
       const res = await fetch('/api/doubao', {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
-        body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }], tools: [{ type: "web_search" }], stream: false })
+        body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }], stream: false })
       });
-      if (!res.ok) throw new Error(`豆包API ${res.status}`);
+      if (!res.ok) {
+        const errText = await res.text();
+        console.error('豆包API错误:', res.status, errText);
+        throw new Error(`豆包API ${res.status}`);
+      }
       const d = await res.json();
       return d.choices[0].message.content;
     }
 
-    // ===== 行情（豆包→腾讯→新浪）=====
+    // ===== 行情（豆包→腾讯）=====
     async function fetchQuote(p) {
       const key = 'q_' + p.secid;
       const cached = JSON.parse(localStorage.getItem(key) || 'null');
       if (cached && Date.now() - cached.t < 60000) return cached.data;
       
-      // 优先豆包
       try {
-        const txt = await askDoubao(`搜索 ${p.secucode} 最新股价和涨跌幅，只返回数字：价格xx，涨跌xx%`);
+        const txt = await askDoubao(`联网搜索 ${p.secucode} 最新股价和涨跌幅，只返回：价格xx，涨跌xx%`);
         const priceMatch = txt.match(/价格\s*(\d+\.?\d*)/);
         const pctMatch = txt.match(/涨跌\s*(-?\d+\.?\d*)%?/);
         if (priceMatch) {
@@ -131,13 +133,12 @@
         }
       } catch(e) { console.log('豆包行情失败'); }
 
-      // 备用：腾讯→新浪
-      for (const fn of [() => fetchFromTencent(p), () => fetchFromSina(p)]) {
-        try {
-          const r = await fn();
-          if (r?.price > 0) { localStorage.setItem(key, JSON.stringify({ data: r, t: Date.now() })); return r; }
-        } catch(e) {}
-      }
+      // 备用腾讯
+      try {
+        const r = await fetchFromTencent(p);
+        if (r?.price > 0) { localStorage.setItem(key, JSON.stringify({ data: r, t: Date.now() })); return r; }
+      } catch(e) {}
+      
       if (cached) return cached.data;
       return { name: p.secucode, price: null, changePct: null, source: '获取失败' };
     }
@@ -151,63 +152,27 @@
       return { name: arr[1], price: +arr[3], changePct: +arr[32], source: '腾讯' };
     }
 
-    async function fetchFromSina(p) {
-      const code = p.isHK ? `rt_hk${p.code}` : p.secucode.replace('.', '').toLowerCase();
-      const res = await fetch(`https://hq.sinajs.cn/list=${code}`, { headers: { Referer: 'https://finance.sina.com.cn' } });
-      const buf = await res.arrayBuffer();
-      const text = new TextDecoder('gbk').decode(buf);
-      const raw = text.split('=')[1]?.replace(/"/g, '').replace(';', '') || '';
-      const arr = raw.split(',');
-      if (p.isHK) return { name: arr[0], price: +arr[6] || +arr[3], changePct: null, source: '新浪港股' };
-      return { name: arr[0], price: +arr[3], changePct: +arr[4], source: '新浪' };
-    }
-
-    // ===== 财务数据（豆包自然语言→东方财富）=====
+    // ===== 财务数据（豆包搜索+带来源的原始摘要）=====
     async function fetchFinance(p) {
       const cacheKey = 'fin_' + p.secid;
       const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null');
       if (cached && Date.now() - cached.t < 1800000) return cached.data;
 
-      // 优先豆包自然语言
       try {
-        const txt = await askDoubao(`搜索 ${p.secucode} 最近3个财年的年报营收和净利润，以及最新季度的营收和净利润。用自然语言总结，格式：年度：营收xx亿，净利润xx亿`);
+        const txt = await askDoubao(`搜索 ${p.secucode} 最近3个财年的年报和最新季报的营收、净利润。对于每一个数据点，必须明确注明数据来源（如“2024年年报显示...”）和具体数字。`);
         const result = [{ period: '最新', summary: txt, source: '豆包' }];
         localStorage.setItem(cacheKey, JSON.stringify({ data: result, t: Date.now() }));
         return result;
       } catch(e) { console.log('豆包财务失败'); }
 
-      // 备用东方财富
-      try {
-        const data = await fetchFinanceFromEastMoney(p);
-        if (data.length > 0) {
-          localStorage.setItem(cacheKey, JSON.stringify({ data, t: Date.now() }));
-          return data;
-        }
-      } catch(e) { console.log('东财财务失败'); }
-
       if (cached) return cached.data;
       return [];
     }
 
-    async function fetchFinanceFromEastMoney(p) {
-      const base = 'https://datacenter.eastmoney.com/securities/api/data/v1/get';
-      const reportName = p.isHK ? 'RPT_HK_F10_FINANCE_MAININDICATOR' : 'RPT_DMSK_FN_MAININDICATOR';
-      const filter = p.isHK ? `(SECURITY_CODE="${p.code}")` : `(SECURITY_CODE="${p.code}")`;
-      const url = base + '?' + new URLSearchParams({ reportName, columns: 'REPORT_DATE,TOTAL_OPERATE_INCOME,PARENT_NETPROFIT', filter, pageNumber: '1', pageSize: '4' });
-      const res = await fetch(url);
-      const json = await res.json();
-      return (json?.result?.data || []).map(d => ({
-        period: d.REPORT_DATE,
-        revenue: d.TOTAL_OPERATE_INCOME ? (d.TOTAL_OPERATE_INCOME / 1e8).toFixed(2) + '亿' : '无',
-        netProfit: d.PARENT_NETPROFIT ? (d.PARENT_NETPROFIT / 1e8).toFixed(2) + '亿' : '无',
-        source: '东方财富'
-      }));
-    }
-
-    // ===== 豆包新闻 =====
+    // ===== 新闻 =====
     async function fetchNews(p) {
       try {
-        const txt = await askDoubao(`搜索 ${p.secucode} ${p.name||''} 最近5条重要新闻，用自然语言列出每条新闻的标题和一句话摘要，标注情绪（利好/利空/中性）`);
+        const txt = await askDoubao(`搜索 ${p.secucode} ${p.name||''} 今天最重要的5条新闻，每条新闻必须注明来源（如“来自东方财富”），并标注情绪。如果没有新闻，就说“无最新新闻”。`);
         return txt;
       } catch(e) { return '新闻获取失败'; }
     }
@@ -235,32 +200,28 @@
         const codes = extractCodes(text);
         let evidence = [], newsText = '';
         for (const c of codes.slice(0, 2)) {
-          // 行情
           const q = await fetchQuote(c);
           evidence.push(`【公司名称】${q.name || c.secucode} (来源:${q.source})`);
           evidence.push(`【最新股价】${q.price?.toFixed(2) || '获取失败'} (来源:${q.source})`);
 
-          // 财务
           setLoadingText('获取财务数据中...');
           const fin = await fetchFinance(c);
           if (fin.length > 0) {
-            fin.forEach(d => evidence.push(`【财务_${d.period}】${d.summary || ('营收' + d.revenue + ' 净利' + d.netProfit)} (来源:${d.source || '多源'})`));
+            fin.forEach(d => evidence.push(`【财务数据_${d.period}】${d.summary} (来源:${d.source || '多源'})`));
           } else {
             evidence.push('【财务数据】暂不可用');
           }
 
-          // 新闻
           setLoadingText('获取新闻中...');
           newsText = await fetchNews(c);
 
-          // 减持链接
           if (c.isHK) evidence.push(`【减持核查】https://sc.hkexnews.hk/TuniS/di.hkex.com.hk/di/NSSrchCorp.aspx?src=MAIN&lang=ZH&g_lang=zh-HK&stockid=${c.code}`);
           else evidence.push(`【减持核查】http://data.eastmoney.com/dxf/q/${c.code}.html`);
         }
 
         setLoadingText('DeepSeek分析中...');
         const sp = `【冠军模式铁律】
-1. 数据缺失时明确说"暂不可用"，禁止编造。
+1. 报告中的数据必须来自提供的【证据数据】和【新闻】。如果数据缺失或错误，必须明确指出。
 2. 报告格式：风险速览→消息面→公司速览→财务透视→行业格局→估值→多空辩论(≥3v3)→投资建议(红绿灯)→数据溯源。
 3. 利空前标【利空】，利好前标【利好】。
 4. 必须提醒核查大股东减持。`;

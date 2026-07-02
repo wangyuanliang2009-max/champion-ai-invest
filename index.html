@@ -3,151 +3,348 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>冠军模式 AI 投资助手</title>
-  <link rel="stylesheet" href="css/style.css">
+  <title>冠军模式 AI 投资助手 · 最终版</title>
+  <style>
+    /* ===== 全局变量与基础样式 ===== */
+    :root {
+      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      --radius: 8px;
+      --shadow-sm: 0 1px 3px rgba(0,0,0,0.06);
+      --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
+      --primary: #00B4A4; --primary-hover: #009688; --primary-light: #e0f7f4;
+      --warning: #F59E0B; --danger: #EF4444; --success: #10B981;
+      --bg-page: #f5f7fa; --bg-card: #ffffff; --bg-input: #f1f3f6;
+      --text-primary: #1a1d26; --text-secondary: #5c6370; --text-muted: #8b929e;
+      --border: #e2e6ed; --code-bg: #1e293b;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: var(--font); font-size: 14px; color: var(--text-primary); background: var(--bg-page); line-height: 1.5; }
+    .app-container { min-height: 100vh; display: flex; flex-direction: column; }
+    .hidden { display: none !important; }
+    /* 按钮等复用样式 */
+    .btn { border: none; border-radius: var(--radius); padding: 8px 16px; font-size: 14px; cursor: pointer; transition: background 0.2s; }
+    .btn-primary { background: var(--primary); color: white; } .btn-primary:hover { background: var(--primary-hover); }
+    .btn-ghost { background: transparent; color: var(--text-secondary); }
+    .btn-outline { border: 1px solid var(--border); background: transparent; color: var(--text-secondary); }
+    .btn-outline:hover { background: var(--bg-input); }
+    .btn-sm { padding: 6px 12px; font-size: 13px; }
+    .card { background: var(--bg-card); border-radius: var(--radius); box-shadow: var(--shadow-sm); overflow: hidden; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+    .badge-rule { background: var(--primary-light); color: var(--primary); }
+    .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; }
+    .tag-green { background: #d1fae5; color: #065f46; } .tag-red { background: #fee2e2; color: #991b1b; }
+    .loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.8); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 1000; }
+    .spinner { width: 40px; height: 40px; border: 4px solid var(--border); border-top: 4px solid var(--primary); border-radius: 50%; animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    /* 消息流 */
+    .message { margin-bottom: 16px; }
+    .message .bubble { background: var(--bg-card); border-radius: var(--radius); padding: 12px 16px; box-shadow: var(--shadow-sm); white-space: pre-wrap; word-break: break-word; }
+    .message.user .bubble { background: var(--primary-light); }
+    .message .meta { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+    .report-body h3 { margin: 20px 0 10px; color: var(--primary); border-bottom: 1px solid var(--border); padding-bottom: 5px; }
+    .report-body h4 { margin: 16px 0 6px; }
+    .report-body p { margin-bottom: 12px; text-align: justify; }
+    .report-body table { width: 100%; border-collapse: collapse; font-size: 0.8rem; margin: 12px 0; }
+    .report-body th, .report-body td { border: 1px solid var(--border); padding: 8px 10px; text-align: left; }
+    .report-body th { background: var(--bg-input); }
+  </style>
 </head>
 <body>
   <div id="app" class="app-container">
-    <!-- 顶部通栏 -->
-    <header class="header">
-      <div class="header-left">
-        <h1 class="logo">冠军模式投资助手</h1>
-        <span class="badge badge-rule" id="rulesBadge">冠军模式已启用</span>
+    <header class="header" style="display:flex; align-items:center; justify-content:space-between; background:var(--bg-card); padding:0 16px; height:60px; box-shadow:var(--shadow-sm);">
+      <div style="display:flex; align-items:center; gap:12px;">
+        <h1 style="font-size:18px; font-weight:700;">冠军模式投资助手</h1>
+        <span class="badge badge-rule">已启用</span>
       </div>
-      <div class="header-right">
-        <button id="btnDarkMode" class="btn-icon" title="深色模式">🌙</button>
-        <button id="btnSettings" class="btn-icon" title="设置">⚙️</button>
+      <div style="display:flex; gap:8px;">
+        <button id="btnManualCheck" class="btn btn-outline btn-sm" title="手动核查减持/披露">🔍 核查</button>
+        <button id="btnDarkMode" class="btn btn-ghost btn-sm" title="深色模式">🌙</button>
+        <button id="btnSettings" class="btn btn-ghost btn-sm" title="设置">⚙️</button>
       </div>
     </header>
 
-    <!-- 模式导航 -->
-    <nav class="nav-tabs">
-      <button class="tab active" data-mode="chat">分析对话</button>
-      <button class="tab" data-mode="premarket">盘前速览</button>
-      <button class="tab" data-mode="postmarket">盘后体检</button>
-      <button class="tab" data-mode="info">产业/信息解析</button>
-    </nav>
-
-    <!-- 主内容区 -->
-    <div class="main-content">
-      <aside class="sidebar" id="sidebar">
-        <div class="card watchlist-card">
-          <div class="card-header">
-            <h3 class="card-title">自选股</h3>
-            <button id="btnRefreshWatchlist" class="btn-icon-sm" title="刷新行情">🔄</button>
+    <div style="display:flex; flex:1; overflow:hidden;">
+      <!-- 左侧自选股 -->
+      <aside style="width:260px; flex-shrink:0; border-right:1px solid var(--border); background:var(--bg-card); padding:12px; display:flex; flex-direction:column; gap:12px;">
+        <div class="card">
+          <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 12px; border-bottom:1px solid var(--border);">
+            <h3 style="font-size:14px;">自选股</h3>
+            <button id="btnRefreshWatchlist" class="btn btn-ghost btn-sm" title="刷新">🔄</button>
           </div>
-          <div class="card-body">
-            <div class="input-row">
-              <input type="text" id="stockInput" placeholder="代码 (如 002409.SZ)" />
+          <div style="padding:12px;">
+            <div style="display:flex; gap:8px; margin-bottom:12px;">
+              <input type="text" id="stockInput" placeholder="代码 (如 002409.SZ)" style="flex:1; padding:8px; border:1px solid var(--border); border-radius:var(--radius); background:var(--bg-input);" />
               <button id="btnAddStock" class="btn btn-primary btn-sm">添加</button>
             </div>
-            <ul id="watchlist" class="watchlist"></ul>
+            <ul id="watchlist" class="watchlist" style="list-style:none; max-height:300px; overflow-y:auto;"></ul>
           </div>
         </div>
-        <div id="reductionAlert" class="alert alert-danger hidden"></div>
+        <div id="reductionAlert" class="hidden" style="font-size:12px; padding:8px; border-radius:4px; background:#fee2e2; color:#991b1b;"></div>
       </aside>
 
-      <main class="main">
-        <!-- 快捷操作工具栏 -->
-        <div class="toolbar" id="quickActions">
-          <span class="toolbar-label">常用：</span>
-          <button class="chip chip-primary" data-action="deep_analyze">深度分析</button>
-          <button class="chip chip-warning" data-action="quick_scan">快速扫描</button>
-          <button class="chip chip-danger" data-action="risk_check">风险排查</button>
-          <span class="toolbar-separator">|</span>
-          <button class="chip chip-secondary" data-action="valuation">估值分析</button>
-          <button class="chip chip-secondary" data-action="debate">多空辩论</button>
-          <button class="chip chip-secondary" data-action="info_extract">提取标的</button>
+      <!-- 右侧主操作区 -->
+      <main style="flex:1; display:flex; flex-direction:column; min-width:0;">
+        <div style="padding:10px 16px; border-bottom:1px solid var(--border); display:flex; gap:6px; flex-wrap:wrap; background:var(--bg-card);">
+          <span style="font-size:12px; color:var(--text-muted); margin-right:4px;">常用：</span>
+          <button class="btn btn-outline btn-sm" data-action="deep_analyze">深度</button>
+          <button class="btn btn-outline btn-sm" data-action="quick_scan">速览</button>
+          <button class="btn btn-outline btn-sm" data-action="risk_check">排雷</button>
+          <button class="btn btn-outline btn-sm" data-action="valuation">估值</button>
+          <button class="btn btn-outline btn-sm" data-action="debate">多空</button>
         </div>
-
-        <!-- 文件上传 -->
-        <div class="upload-area" id="fileUploadArea">
-          <label for="fileInput" class="upload-label">📎 点击上传文件/图片 (豆包分析)</label>
-          <input type="file" id="fileInput" accept="image/*,.pdf,.txt,.csv,.xlsx" style="display:none" multiple />
+        <div id="chatMessages" style="flex:1; overflow-y:auto; padding:16px; background:var(--bg-page);">
+          <div class="chat-placeholder" style="text-align:center; color:var(--text-muted); margin-top:40px;">输入股票代码或分析指令开始</div>
         </div>
-
-        <!-- 对话/报告展示区 -->
-        <div class="chat-container" id="chatMessages">
-          <div class="chat-placeholder">输入股票代码或分析指令开始</div>
-        </div>
-
-        <!-- 底部输入区 -->
-        <div class="input-area">
-          <textarea id="chatInput" rows="2" placeholder="输入分析指令、股票代码或粘贴产业信息..."></textarea>
-          <div class="input-actions">
-            <button id="btnClearChat" class="btn btn-ghost">清屏</button>
-            <button id="btnManualCheck" class="btn btn-outline" title="打开港交所/东方财富手动查询减持">🔍 核查</button>
+        <div style="border-top:1px solid var(--border); background:var(--bg-card); padding:12px 16px;">
+          <textarea id="chatInput" rows="2" placeholder="输入分析指令、股票代码或粘贴产业信息..." style="width:100%; padding:10px; border:1px solid var(--border); border-radius:var(--radius); resize:none; background:var(--bg-input);"></textarea>
+          <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:8px;">
+            <button id="btnClearChat" class="btn btn-ghost btn-sm">清屏</button>
             <button id="btnSend" class="btn btn-primary">发送分析</button>
           </div>
         </div>
       </main>
     </div>
-
-    <!-- 底部状态栏 -->
-    <footer class="status-bar">
+    <footer style="display:flex; justify-content:space-between; padding:4px 16px; font-size:12px; color:var(--text-muted); background:var(--bg-card); border-top:1px solid var(--border);">
       <span id="statusText">就绪</span>
       <span id="statusTime">--</span>
     </footer>
-
-    <!-- 加载遮罩 -->
-    <div id="loadingOverlay" class="loading-overlay hidden">
-      <div class="spinner"></div>
-      <p>分析中...</p>
-    </div>
+    <div id="loadingOverlay" class="loading-overlay hidden"><div class="spinner"></div><p>分析中...</p></div>
   </div>
 
   <!-- 设置模态框 -->
-  <div id="settingsModal" class="modal hidden">
-    <div class="modal-backdrop"></div>
-    <div class="modal-content card">
-      <div class="modal-header">
-        <h3>设置</h3>
-        <button id="btnCloseSettings" class="btn-icon-sm">✕</button>
+  <div id="settingsModal" class="modal hidden" style="position:fixed; inset:0; z-index:2000; display:flex; align-items:center; justify-content:center;">
+    <div style="position:absolute; inset:0; background:rgba(0,0,0,0.4);" onclick="closeSettings()"></div>
+    <div class="card" style="position:relative; width:90%; max-width:420px;">
+      <div style="display:flex; justify-content:space-between; padding:12px 16px; border-bottom:1px solid var(--border);"><h3>设置</h3><button onclick="closeSettings()" class="btn btn-ghost btn-sm">✕</button></div>
+      <div style="padding:16px; display:flex; flex-direction:column; gap:10px;">
+        <label>DeepSeek API 密钥 <span style="color:var(--danger);">*必填</span></label>
+        <input type="password" id="apiKeyInput" placeholder="sk-..." style="padding:8px; border:1px solid var(--border); border-radius:var(--radius);" />
+        <label>豆包 API 密钥 <span style="color:var(--text-muted);">(选填，用于消息面)</span></label>
+        <input type="password" id="doubaoApiKeyInput" placeholder="sk-..." style="padding:8px; border:1px solid var(--border); border-radius:var(--radius);" />
+        <label>WACC 基准 (%)</label>
+        <input type="number" id="waccInput" value="8.0" step="0.5" min="4" max="15" style="padding:8px; border:1px solid var(--border); border-radius:var(--radius);" />
+        <label>永续增长率 (%)</label>
+        <input type="number" id="growthInput" value="2.0" step="0.1" min="0" max="5" style="padding:8px; border:1px solid var(--border); border-radius:var(--radius);" />
       </div>
-      <div class="modal-body">
-        <label>DeepSeek API 密钥</label>
-        <input type="password" id="apiKeyInput" placeholder="sk-..." />
-        <label>豆包 API 密钥（行情与新闻）</label>
-        <input type="password" id="doubaoApiKeyInput" placeholder="sk-..." />
-        <label>模型</label>
-        <select id="modelSelect">
-          <option value="deepseek-chat">deepseek-chat</option>
-          <option value="deepseek-reasoner">deepseek-reasoner</option>
-        </select>
-      </div>
-      <div class="modal-footer">
+      <div style="padding:12px 16px; text-align:right;">
         <button id="btnSaveSettings" class="btn btn-primary">保存</button>
       </div>
     </div>
   </div>
 
-  <!-- 规则管理面板 -->
-  <div id="rulesPanel" class="panel hidden">
-    <div class="panel-header">
-      <h3>规则管理</h3>
-      <button id="btnCloseRules" class="btn-icon-sm">✕</button>
-    </div>
-    <div class="panel-body">
-      <div id="rulesList"></div>
-      <div class="rule-input-row">
-        <input type="text" id="newRuleInput" placeholder="新增规则..." />
-        <button id="btnAddRule" class="btn btn-primary btn-sm">添加</button>
-        <button id="btnRuleMic" class="btn btn-ghost btn-sm">🎤</button>
-      </div>
-    </div>
-  </div>
+  <script>
+    // ==================== 全局状态与DOM引用 ====================
+    const $ = (s) => document.querySelector(s);
+    let watchlist = [], chatHistory = [], selectedStock = null;
+    let evidenceLedger = [], valuationCalcLedger = [];
 
-  <!-- 移动端导航 -->
-  <div class="mobile-nav">
-    <button id="navChat" class="active">💬 对话</button>
-    <button id="navRules">📋 规则</button>
-  </div>
+    // ==================== 数据获取层 ====================
+    async function fetchQuote(parsed) {
+      const cacheKey = parsed.secid;
+      const cached = JSON.parse(localStorage.getItem('q_' + cacheKey) || 'null');
+      if (cached && (Date.now() - cached.t < 60000)) return cached.data;
+      
+      // 数据源列表：豆包 > 新浪 > 腾讯
+      const sources = [
+        () => fetchFromDoubao(parsed),
+        () => fetchFromSina(parsed),
+        () => fetchFromTencent(parsed)
+      ];
+      for (const fn of sources) {
+        try {
+          const result = await fn();
+          if (result && result.price > 0) {
+            localStorage.setItem('q_' + cacheKey, JSON.stringify({ data: result, t: Date.now() }));
+            return result;
+          }
+        } catch(e) {}
+      }
+      if (cached) return cached.data;
+      throw new Error('所有行情源不可用');
+    }
 
-  <script src="js/config.js"></script>
-  <script src="js/storage.js"></script>
-  <script src="js/api.js"></script>
-  <script src="js/data.js"></script>
-  <script src="js/rules.js"></script>
-  <script src="js/app.js"></script>
+    async function fetchFromDoubao(p) {
+      const key = localStorage.getItem('doubao_key'); if (!key) throw new Error('无豆包Key');
+      const res = await fetch('https://ark.cn-beijing.volces.com/api/v3/chat/completions', {
+        method:'POST', headers:{'Content-Type':'application/json','Authorization':`Bearer ${key}`},
+        body: JSON.stringify({model:'ep-2024-...', messages:[{role:'user',content:`搜索 ${p.secucode} 最新价和涨跌幅，返回JSON：{"price":123,"changePct":1.5}`}], enable_search:true, stream:false})
+      });
+      const d = await res.json();
+      const txt = d.choices[0].message.content; const json = JSON.parse(txt);
+      return { name: p.secucode, price: Number(json.price), changePct: Number(json.changePct), source: '豆包' };
+    }
+
+    async function fetchFromSina(p) {
+      const code = p.isHK ? `rt_hk${p.code}` : p.secucode.replace('.','').toLowerCase();
+      const res = await fetch(`https://hq.sinajs.cn/list=${code}`);
+      const arr = (await res.text()).split('=')[1].replace(/"/g,'').split(',');
+      return { name: arr[0], price: parseFloat(arr[3]), changePct: parseFloat(arr[4]), source: '新浪' };
+    }
+
+    async function fetchFromTencent(p) {
+      const code = p.isHK ? `hk${p.code}` : p.secucode.replace('.','').toLowerCase();
+      const res = await fetch(`https://qt.gtimg.cn/q=${code}`);
+      const arr = (await res.text()).split('~');
+      return { name: arr[1], price: parseFloat(arr[3]), changePct: parseFloat(arr[32]), source: '腾讯' };
+    }
+
+    async function buildEvidence(parsed) {
+      const ledger = [];
+      let quote; try { quote = await fetchQuote(parsed); } catch(e) { quote = { name: parsed.secucode, price: null, changePct: null }; }
+      ledger.push({ fact_id:'F001', metric:'latest_price', value: quote.price, period: new Date().toLocaleDateString(), source: quote.source || '未知', data_class:'A' });
+      // 财务数据（简化，自动获取最近一期）
+      try {
+        const finUrl = parsed.isHK
+          ? `https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_HK_F10_FINANCE_MAININDICATOR&columns=REPORT_DATE,BASIC_EPS,PARENT_NETPROFIT,TOTAL_OPERATE_INCOME&filter=(SECURITY_CODE="${parsed.secucode}")&pageNumber=1&pageSize=2`
+          : `https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_DMSK_FN_MAININDICATOR&columns=REPORT_DATE,BASIC_EPS,PARENT_NETPROFIT,TOTAL_OPERATE_INCOME&filter=(SECURITY_CODE="${parsed.code}")&pageNumber=1&pageSize=2`;
+        const fr = await fetch(finUrl); const fj = await fr.json();
+        if (fj?.result?.data?.length) {
+          const d = fj.result.data[0];
+          ledger.push({ fact_id:'F002', metric:'revenue', value: (d.TOTAL_OPERATE_INCOME/1e8).toFixed(2)+'亿', period: d.REPORT_DATE, source:'东方财富', data_class:'A' });
+          ledger.push({ fact_id:'F003', metric:'net_profit', value: (d.PARENT_NETPROFIT/1e8).toFixed(2)+'亿', period: d.REPORT_DATE, source:'东方财富', data_class:'A' });
+        }
+      } catch(e) {}
+      return ledger;
+    }
+
+    // ==================== 计算层（证据账本 + DCF估值） ====================
+    function calcDCF(evidence, wacc, g) {
+      const revFact = evidence.find(f=>f.metric==='revenue'), profitFact = evidence.find(f=>f.metric==='net_profit');
+      if (!profitFact) return { status:'blocked', reason:'无利润数据' };
+      const baseProfit = parseFloat(profitFact.value);
+      const fcf = baseProfit * 0.8; // 简化为FCF
+      const projections = [fcf*1.1, fcf*1.05, fcf*1.03];
+      let pv = 0; for(let i=0;i<3;i++) pv += projections[i] / Math.pow(1+wacc, i+1);
+      const terminal = (projections[2]*(1+g)) / (wacc - g);
+      const terminalPV = terminal / Math.pow(1+wacc, 3);
+      return { perShare: ((pv+terminalPV) / 12.56).toFixed(2), status:'ok' };
+    }
+
+    // ==================== DeepSeek 调用 ====================
+    async function callDeepSeek(messages, retries=2) {
+      const key = localStorage.getItem('ds_key'); if (!key) throw new Error('请先配置DeepSeek API密钥');
+      for (let i=0; i<=retries; i++) {
+        try {
+          const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
+            method:'POST', headers:{'Content-Type':'application/json','Authorization':`Bearer ${key}`},
+            body: JSON.stringify({ model:'deepseek-chat', messages, temperature:0, max_tokens:8192 })
+          });
+          if (res.status === 429 || res.status === 503) { await new Promise(r=>setTimeout(r, (i+1)*2000)); continue; }
+          if (!res.ok) throw new Error(`API ${res.status}`);
+          return (await res.json()).choices[0].message.content;
+        } catch(e) { if(i===retries) throw e; await new Promise(r=>setTimeout(r, 1000)); }
+      }
+    }
+
+    // ==================== 核心发送逻辑 ====================
+    document.getElementById('btnSend').addEventListener('click', async () => {
+      const text = $('#chatInput').value.trim(); if (!text) return;
+      if (!localStorage.getItem('ds_key')) { openSettings(); return; }
+      
+      const userMsg = { role:'user', content: text, time: new Date().toLocaleTimeString() };
+      chatHistory.push(userMsg); appendMessageUI(userMsg); $('#chatInput').value = '';
+      showLoading(true);
+
+      try {
+        const codes = extractStockCodes(text);
+        let evidenceAll = [];
+        for (const c of codes.slice(0,2)) { evidenceAll.push(...await buildEvidence(c)); }
+        evidenceLedger = evidenceAll;
+
+        const wacc = parseFloat(localStorage.getItem('wacc')||8)/100;
+        const growth = parseFloat(localStorage.getItem('growth')||2)/100;
+        const dcfResult = calcDCF(evidenceAll, wacc, growth);
+        valuationCalcLedger = [{ calc_id:'C001', type:'dcf', result: dcfResult.perShare, unit:'CNY/share', note: dcfResult.status }];
+
+        // 强制减持指令
+        let reductionCmd = '';
+        codes.forEach(c => {
+          if (c.isHK) reductionCmd += `\n【⚠️ 港股减持强制核查：${c.code}】请务必提醒用户手动查询披露易：https://sc.hkexnews.hk/TuniS/di.hkex.com.hk/di/NSSrchCorp.aspx?src=MAIN&lang=ZH&g_lang=zh-HK&stockid=${c.code}`;
+          else reductionCmd += `\n【⚠️ A股减持强制核查：${c.code}】东方财富：http://data.eastmoney.com/dxf/q/${c.code}.html 巨潮资讯网：http://www.cninfo.com.cn/new/commonUrl?url=disclosure/list/notice&stockCode=${c.code}`;
+        });
+
+        const systemPrompt = `【冠军模式核心铁律·最高优先级】
+1. 数据缺失时明确说"暂不可用"，禁止用训练数据编造。
+2. 所有数字必须标注来源。
+3. 报告格式：风险速览→消息面→公司速览→财务透视→行业格局→估值→多空辩论（至少3v3）→投资建议→数据溯源。
+4. 利空绿字，利好红字。
+5. 必须提醒用户核查大股东减持（尤其是港股）。`;
+
+        const finalPrompt = `${text}\n\n证据账本：${JSON.stringify(evidenceLedger)}\n估值计算账本：${JSON.stringify(valuationCalcLedger)}\n${reductionCmd}`;
+        const messages = [{ role:'system', content: systemPrompt }, ...chatHistory.slice(-4).map(m=>({role:m.role,content:m.content}))];
+        messages.push({ role:'user', content: finalPrompt });
+
+        const reply = await callDeepSeek(messages);
+        const asstMsg = { role:'assistant', content: reply, time: new Date().toLocaleTimeString() };
+        chatHistory.push(asstMsg); appendMessageUI(asstMsg);
+      } catch(e) {
+        appendMessageUI({ role:'assistant', content: `分析失败: ${e.message}`, time: new Date().toLocaleTimeString() });
+      } finally { showLoading(false); scrollToBottom(); }
+    });
+
+    // ==================== UI辅助 ====================
+    function appendMessageUI(msg) {
+      const div = document.createElement('div'); div.className = 'message ' + msg.role;
+      div.innerHTML = `<div class="bubble">${escapeHtml(msg.content)}</div><div class="meta">${msg.time}</div>`;
+      $('#chatMessages').appendChild(div);
+    }
+    function showLoading(s) { $('#loadingOverlay').classList.toggle('hidden', !s); }
+    function scrollToBottom() { const el = $('#chatMessages'); el.scrollTop = el.scrollHeight; }
+    function escapeHtml(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+    function openSettings() { $('#settingsModal').classList.remove('hidden'); }
+    function closeSettings() { $('#settingsModal').classList.add('hidden'); }
+
+    // 设置保存
+    document.getElementById('btnSaveSettings').addEventListener('click', () => {
+      localStorage.setItem('ds_key', $('#apiKeyInput').value.trim());
+      localStorage.setItem('doubao_key', $('#doubaoApiKeyInput').value.trim());
+      localStorage.setItem('wacc', $('#waccInput').value);
+      localStorage.setItem('growth', $('#growthInput').value);
+      closeSettings();
+    });
+
+    // 手动核查按钮
+    document.getElementById('btnManualCheck').addEventListener('click', () => {
+      const codes = selectedStock ? [selectedStock] : watchlist;
+      if (!codes.length) { alert('请先添加自选股'); return; }
+      let urls = '';
+      codes.forEach(s => {
+        const p = parseStockCode(s.secucode || s);
+        if (!p) return;
+        if (p.isHK) urls += `<a href="https://sc.hkexnews.hk/TuniS/di.hkex.com.hk/di/NSSrchCorp.aspx?src=MAIN&lang=ZH&g_lang=zh-HK&stockid=${p.code}" target="_blank">港交所 (${p.code})</a><br>`;
+        else { urls += `<a href="https://data.eastmoney.com/dxf/q/${p.code}.html" target="_blank">东方财富减持 (${p.code})</a><br>`;
+               urls += `<a href="http://www.cninfo.com.cn/new/commonUrl?url=disclosure/list/notice&stockCode=${p.code}" target="_blank">巨潮资讯网 (${p.code})</a><br>`; }
+      });
+      const w = window.open('', '_blank', 'width=800,height=600');
+      w.document.write(`<h3>手动核查减持</h3>${urls}`);
+    });
+
+    // 提取股票代码
+    function extractStockCodes(t) {
+      const seen = new Set(); const codes = [];
+      const hkR = /\b(\d{1,5})\s*\.?\s*HK\b/gi; let m;
+      while((m=hkR.exec(t))) { const p=parseStockCode(m[0]); if(p&&!seen.has(p.secid)){seen.add(p.secid);codes.push(p);} }
+      const aR = /\b(\d{6})\s*\.?\s*(SZ|SH)\b/gi;
+      while((m=aR.exec(t))) { const p=parseStockCode(m[0]); if(p&&!seen.has(p.secid)){seen.add(p.secid);codes.push(p);} }
+      return codes;
+    }
+    function parseStockCode(r) {
+      if(!r) return null; const c=r.trim().toUpperCase().replace(/\s/g,'');
+      const hk=c.match(/^(\d{1,5})(\.HK)?$/); if(hk){ const n=hk[1].padStart(5,'0'); return {secucode:`${n}.HK`,secid:`116.${n}`,code:n,isHK:true}; }
+      const a=c.match(/^(\d{6})(\.(SZ|SH))?$/); if(a){ const n=a[1]; const mkt=a[3]||(n[0]==='0'||n[0]==='3'?'SZ':'SH'); return {secucode:`${n}.${mkt}`,secid:`${mkt==='SZ'?'0':'1'}.${n}`,code:n,isHK:false}; }
+      return null;
+    }
+
+    // 初始化
+    (function init() {
+      const savedWatch = JSON.parse(localStorage.getItem('watchlist')||'[]');
+      watchlist = savedWatch;
+      // 设置回显
+      if(localStorage.getItem('ds_key')) $('#apiKeyInput').value = localStorage.getItem('ds_key');
+      if(localStorage.getItem('doubao_key')) $('#doubaoApiKeyInput').value = localStorage.getItem('doubao_key');
+      if(localStorage.getItem('wacc')) $('#waccInput').value = localStorage.getItem('wacc');
+      if(localStorage.getItem('growth')) $('#growthInput').value = localStorage.getItem('growth');
+    })();
+  </script>
 </body>
 </html>

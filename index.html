@@ -97,6 +97,20 @@
     const $ = s => document.querySelector(s);
     let watchlist = [], chatHistory = [], selectedStock = null;
 
+    // ===== 强韧JSON提取器 =====
+    function extractJSON(text) {
+      if (!text) return null;
+      // 移除markdown代码块标记
+      let cleaned = text.replace(/```json|```/g, '').trim();
+      // 尝试提取第一个JSON对象或数组
+      let start = cleaned.indexOf('{');
+      let end = cleaned.lastIndexOf('}');
+      if (start === -1) { start = cleaned.indexOf('['); end = cleaned.lastIndexOf(']'); }
+      if (start === -1 || end <= start) return null;
+      cleaned = cleaned.substring(start, end + 1);
+      try { return JSON.parse(cleaned); } catch (e) { return null; }
+    }
+
     // ===== 行情（豆包→新浪→腾讯）=====
     async function fetchQuote(p) {
       const key = 'q_' + p.secid;
@@ -104,7 +118,7 @@
       if (cached && Date.now() - cached.t < 60000) return cached.data;
       const fns = [() => fetchFromDoubao(p), () => fetchFromSina(p), () => fetchFromTencent(p)];
       for (const fn of fns) {
-        try { const r = await fn(); if (r?.price > 0) { localStorage.setItem(key, JSON.stringify({ data: r, t: Date.now() })); return r; } } catch (e) {}
+        try { const r = await fn(); if (r?.price > 0) { localStorage.setItem(key, JSON.stringify({ data: r, t: Date.now() })); return r; } } catch (e) { console.log('行情源失败', fn.name, e); }
       }
       if (cached) return cached.data;
       return { name: p.secucode, price: null, changePct: null, source: '获取失败' };
@@ -118,8 +132,10 @@
         body: JSON.stringify({ model, messages: [{ role: 'user', content: `搜索 ${p.secucode} 最新股价和涨跌幅，返回JSON：{"price":数字,"changePct":数字}` }], enable_search: true, stream: false })
       });
       const d = await res.json(), txt = d.choices[0].message.content;
-      const json = JSON.parse(txt.replace(/```json|```/g, ''));
-      return { name: p.secucode, price: +json.price, changePct: +json.changePct, source: '豆包' };
+      console.log('豆包行情原始返回:', txt);
+      const json = extractJSON(txt);
+      if (!json || typeof json.price !== 'number') throw new Error('豆包行情解析失败');
+      return { name: p.secucode, price: +json.price, changePct: +(json.changePct || 0), source: '豆包' };
     }
 
     async function fetchFromSina(p) {
@@ -136,7 +152,7 @@
       return { name: arr[1], price: +arr[3], changePct: +arr[32], source: '腾讯' };
     }
 
-    // ===== 财务数据（多源冗余：豆包搜索→东方财富→腾讯→缓存）=====
+    // ===== 财务数据（多源冗余：豆包→东方财富→腾讯）=====
     async function fetchFinance(p) {
       const cacheKey = 'fin_' + p.secid;
       const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null');
@@ -155,10 +171,8 @@
             localStorage.setItem(cacheKey, JSON.stringify({ data, t: Date.now() }));
             return data;
           }
-        } catch (e) { /* 静默失败，尝试下一个 */ }
+        } catch (e) { console.log('财务源失败', fn.name, e); }
       }
-
-      // 全部失败，返回缓存或空数组
       if (cached) return cached.data;
       return [];
     }
@@ -171,8 +185,10 @@
         body: JSON.stringify({ model, messages: [{ role: 'user', content: `搜索 ${p.secucode} 最近3个财年的年度营收和净利润，以及最近一个季度的营收和净利润。返回JSON数组：[{"period":"2025","revenue":数字,"netProfit":数字,"unit":"亿元"},...]。仅返回JSON，不要其他文字。` }], enable_search: true, stream: false })
       });
       const d = await res.json(), txt = d.choices[0].message.content;
-      const json = JSON.parse(txt.replace(/```json|```/g, ''));
-      return Array.isArray(json) ? json : [];
+      console.log('豆包财务原始返回:', txt);
+      const json = extractJSON(txt);
+      if (!Array.isArray(json)) throw new Error('豆包财务解析非数组');
+      return json;
     }
 
     async function fetchFinanceFromEastMoney(p) {
@@ -195,7 +211,6 @@
       const code = p.isHK ? `hk${p.code}` : p.secucode.replace('.', '').toLowerCase();
       const res = await fetch(`https://qt.gtimg.cn/q=${code}`);
       const arr = (await res.text()).split('~');
-      // 腾讯接口只能获取有限财务数据，作为兜底
       if (arr.length > 50) {
         return [{
           period: new Date().getFullYear().toString(),
@@ -217,8 +232,10 @@
           body: JSON.stringify({ model, messages: [{ role: 'user', content: `搜索 ${p.secucode} ${p.name||''} 最近5条重要新闻，返回JSON数组：[{"title":"...","source":"...","sentiment":"利好/利空/中性","summary":"..."}]` }], enable_search: true, stream: false })
         });
         const d = await res.json(), txt = d.choices[0].message.content;
-        return JSON.parse(txt.replace(/```json|```/g, ''));
-      } catch (e) { return []; }
+        console.log('豆包新闻原始返回:', txt);
+        const json = extractJSON(txt);
+        return Array.isArray(json) ? json : [];
+      } catch (e) { console.log('新闻获取失败', e); return []; }
     }
 
     // ===== DeepSeek =====
@@ -239,7 +256,7 @@
 
     // ===== DCF估值 =====
     function calcDCF(finance, wacc, g) {
-      const profits = finance.filter(f => f.netProfit > 0).map(f => f.netProfit / (f.unit === '元' ? 1e8 : 1));
+      const profits = finance.filter(f => f.netProfit > 0).map(f => f.netProfit / (f.unit === '元' ? 1e8 : (f.unit === '万元' ? 1e4 : 1)));
       if (profits.length < 2) return { status: 'blocked', reason: '利润数据不足' };
       const base = profits[profits.length - 1];
       const growth = Math.min((base / profits[0] - 1) / profits.length, 0.2);
@@ -264,15 +281,16 @@
         for (const c of codes.slice(0, 2)) {
           // 行情
           const q = await fetchQuote(c);
-          evidence.push({ id: 'F001', metric: '最新价', value: q.price?.toFixed(2) || '获取失败', source: q.source });
+          evidence.push({ id: 'F001', metric: '公司名称', value: q.name || c.secucode, source: q.source });
+          evidence.push({ id: 'F002', metric: '最新价', value: q.price?.toFixed(2) || '获取失败', source: q.source });
 
-          // 财务（多源冗余）
+          // 财务
           const fin = await fetchFinance(c);
           if (fin.length > 0) {
             fin.forEach((d, i) => {
               const unit = d.unit === '元' ? '亿' : (d.unit || '');
-              const rev = d.revenue ? (d.revenue / (d.unit === '元' ? 1e8 : 1)).toFixed(2) + unit : '无';
-              const np = d.netProfit ? (d.netProfit / (d.unit === '元' ? 1e8 : 1)).toFixed(2) + unit : '无';
+              const rev = d.revenue ? (d.revenue / (d.unit === '元' ? 1e8 : (d.unit === '万元' ? 1e4 : 1))).toFixed(2) + unit : '无';
+              const np = d.netProfit ? (d.netProfit / (d.unit === '元' ? 1e8 : (d.unit === '万元' ? 1e4 : 1))).toFixed(2) + unit : '无';
               evidence.push({ id: `F${10+i}`, metric: `财务_${d.period}`, value: `营收${rev} 净利${np}`, source: '多源财务' });
             });
           } else {
@@ -313,7 +331,7 @@
       finally { showLoading(false); scrollToBottom(); }
     });
 
-    // ===== UI =====
+    // ===== UI辅助 =====
     function appendMessageUI(m) { const d = document.createElement('div'); d.className = 'message ' + m.role; d.innerHTML = `<div class="bubble">${escapeHtml(m.content)}</div><div class="meta">${m.time}</div>`; $('#chatMessages').appendChild(d); }
     function showLoading(s) { $('#loadingOverlay').classList.toggle('hidden', !s); }
     function scrollToBottom() { const e = $('#chatMessages'); e.scrollTop = e.scrollHeight; }
